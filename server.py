@@ -15,7 +15,7 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
         language_code (str): The language code (default is "en" for English).
 
     Returns:
-        dict: A dictionary containing keyword data, including search volume, competition, competition index, CPC, monthly searches, and the raw API response.
+        dict: A dictionary containing keyword data, including search volume, competition, competition index, and CPC.
     """
     # DataForSEO API endpoint
     url = "https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live"
@@ -69,9 +69,7 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
             "search_volume": result.get('search_volume'),
             "competition": result.get('competition'),
             "competition_index": result.get('competition_index'),
-            "cpc": result.get('cpc'),
-            "monthly_searches": result.get('monthly_searches'),
-            "raw": result
+            "cpc": result.get('cpc')
         }
         return keyword_data
     except (KeyError, IndexError, TypeError) as e:

@@ -7,7 +7,7 @@ mcp = FastMCP("Keyword MCP Server")
 @mcp.tool
 def get_search_volume(keyword: str, location_code: int = 2840, language_code: str = "en") -> dict:
     """
-    Fetches search volume data for a given keyword using DataForSEO API.
+    Fetches keyword overview data for a given keyword using DataForSEO API.
 
     Args:
         keyword (str): The keyword to fetch data for.
@@ -15,10 +15,10 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
         language_code (str): The language code (default is "en" for English).
 
     Returns:
-        dict: A dictionary containing keyword data, including search volume, competition, competition index, and CPC.
+        dict: A dictionary containing keyword data, including search volume, keyword difficulty, and main intent.
     """
     # DataForSEO API endpoint
-    url = "https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live"
+    url = "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_overview/live"
 
     # Retrieve DataForSEO Base64 authorization key from environment variable
     api_key_base64 = os.getenv("DATAFORSEO_API_KEY")  # Base64 encoded "username:password"
@@ -29,8 +29,10 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
     # Prepare the payload
     payload = [
         {
-            "location_code": location_code,
             "language_code": language_code,
+            "location_code": location_code,
+            "include_clickstream_data": True,
+            "include_serp_info": True,
             "keywords": [keyword]
         }
     ]
@@ -49,7 +51,7 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
     # Parse the response
     data = response.json()
 
-    # Extract relevant data from tasks[0].result[0]
+    # Extract relevant data from tasks[0].result[0].items[0]
     try:
         if 'tasks' not in data or not data['tasks']:
             raise Exception("No tasks in DataForSEO API response")
@@ -64,12 +66,28 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
             raise Exception("DataForSEO API result is not a list or is empty")
         
         result = task['result'][0]
+        if 'items' not in result or not result['items']:
+            raise Exception("DataForSEO API result has no items")
+        
+        item = result['items'][0]
+        
+        # Extract search_volume from keyword_info
+        keyword_info = item.get('keyword_info', {})
+        search_volume = keyword_info.get('search_volume')
+        
+        # Extract keyword_difficulty from keyword_properties
+        keyword_properties = item.get('keyword_properties', {})
+        keyword_difficulty = keyword_properties.get('keyword_difficulty')
+        
+        # Extract main_intent from search_intent_info
+        search_intent_info = item.get('search_intent_info', {})
+        main_intent = search_intent_info.get('main_intent')
+        
         keyword_data = {
-            "keyword": result.get('keyword'),
-            "search_volume": result.get('search_volume'),
-            "competition": result.get('competition'),
-            "competition_index": result.get('competition_index'),
-            "cpc": result.get('cpc')
+            "keyword": item.get('keyword'),
+            "search_volume": search_volume,
+            "keyword_difficulty": keyword_difficulty,
+            "main_intent": main_intent
         }
         return keyword_data
     except (KeyError, IndexError, TypeError) as e:

@@ -12,9 +12,8 @@
 
 3. **Configure environment variables**
    - In Railway dashboard, go to your service → Variables
-   - Add the following environment variables:
-     - `DATAFORSEO_API_KEY` - Your DataForSEO login email
-     - `DATAFORSEO_API_SECRET` - Your DataForSEO API password
+   - Add the following environment variable:
+     - `DATAFORSEO_API_KEY` - Your DataForSEO Base64 authorization key (format: Base64 encoded "username:password")
    - Optionally set `PORT` (defaults to 8000 if not set)
 
 4. **Access the MCP endpoint**

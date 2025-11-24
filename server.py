@@ -20,12 +20,11 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
     # DataForSEO API endpoint
     url = "https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live"
 
-    # Retrieve DataForSEO credentials from environment variables
-    api_key = os.getenv("DATAFORSEO_API_KEY")  # Login email
-    api_secret = os.getenv("DATAFORSEO_API_SECRET")  # API password
+    # Retrieve DataForSEO Base64 authorization key from environment variable
+    api_key_base64 = os.getenv("DATAFORSEO_API_KEY")  # Base64 encoded "username:password"
 
-    if not api_key or not api_secret:
-        raise ValueError("DataForSEO credentials are not set in environment variables.")
+    if not api_key_base64:
+        raise ValueError("DATAFORSEO_API_KEY environment variable is not set.")
 
     # Prepare the payload
     payload = [
@@ -36,8 +35,12 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
         }
     ]
 
-    # Make the POST request with HTTP Basic Auth
-    response = requests.post(url, auth=(api_key, api_secret), json=payload)
+    # Make the POST request with Base64 Authorization header
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Basic {api_key_base64}"
+    }
+    response = requests.post(url, headers=headers, json=payload)
 
     # Check for successful response
     if response.status_code != 200:

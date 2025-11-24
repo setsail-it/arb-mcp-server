@@ -48,7 +48,19 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
 
     # Extract relevant data from tasks[0].result[0]
     try:
-        result = data['tasks'][0]['result'][0]
+        if 'tasks' not in data or not data['tasks']:
+            raise Exception("No tasks in DataForSEO API response")
+        
+        task = data['tasks'][0]
+        if 'result' not in task or not task['result']:
+            status_code = task.get('status_code')
+            status_message = task.get('status_message', 'Unknown error')
+            raise Exception(f"DataForSEO API returned no result. Status: {status_code} - {status_message}")
+        
+        if not isinstance(task['result'], list) or not task['result']:
+            raise Exception("DataForSEO API result is not a list or is empty")
+        
+        result = task['result'][0]
         keyword_data = {
             "keyword": result.get('keyword'),
             "search_volume": result.get('search_volume'),
@@ -59,8 +71,8 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
             "raw": result
         }
         return keyword_data
-    except (KeyError, IndexError) as e:
-        raise Exception(f"Unexpected response structure from DataForSEO API: {e}")
+    except (KeyError, IndexError, TypeError) as e:
+        raise Exception(f"Unexpected response structure from DataForSEO API: {e}. Response: {data}")
 
 if __name__ == "__main__":
     # Run the MCP server

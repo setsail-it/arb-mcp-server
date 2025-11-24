@@ -1,0 +1,68 @@
+import os
+import requests
+from mcp import FastMCP
+
+mcp = FastMCP("Keyword MCP Server")
+
+@mcp.tool
+def get_search_volume(keyword: str, location_code: int = 2840, language_code: str = "en") -> dict:
+    """
+    Fetches search volume data for a given keyword using DataForSEO API.
+
+    Args:
+        keyword (str): The keyword to fetch data for.
+        location_code (int): The location code (default is 2840 for the United States).
+        language_code (str): The language code (default is "en" for English).
+
+    Returns:
+        dict: A dictionary containing keyword data, including search volume, competition, competition index, CPC, monthly searches, and the raw API response.
+    """
+    # DataForSEO API endpoint
+    url = "https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live"
+
+    # Retrieve DataForSEO credentials from environment variables
+    login = os.getenv("DATAFORSEO_LOGIN")
+    password = os.getenv("DATAFORSEO_PASSWORD")
+
+    if not login or not password:
+        raise ValueError("DataForSEO credentials are not set in environment variables.")
+
+    # Prepare the payload
+    payload = [
+        {
+            "location_code": location_code,
+            "language_code": language_code,
+            "keywords": [keyword]
+        }
+    ]
+
+    # Make the POST request with HTTP Basic Auth
+    response = requests.post(url, auth=(login, password), json=payload)
+
+    # Check for successful response
+    if response.status_code != 200:
+        raise Exception(f"DataForSEO API request failed with status code {response.status_code}: {response.text}")
+
+    # Parse the response
+    data = response.json()
+
+    # Extract relevant data from tasks[0].result[0]
+    try:
+        result = data['tasks'][0]['result'][0]
+        keyword_data = {
+            "keyword": result.get('keyword'),
+            "search_volume": result.get('search_volume'),
+            "competition": result.get('competition'),
+            "competition_index": result.get('competition_index'),
+            "cpc": result.get('cpc'),
+            "monthly_searches": result.get('monthly_searches'),
+            "raw": result
+        }
+        return keyword_data
+    except (KeyError, IndexError) as e:
+        raise Exception(f"Unexpected response structure from DataForSEO API: {e}")
+
+if __name__ == "__main__":
+    # Run the MCP server
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
+

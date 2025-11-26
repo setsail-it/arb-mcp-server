@@ -112,13 +112,13 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
 
 
 @mcp.tool
-def readHTML(client_id: int, blog_id: int, version_number: int) -> dict:
+def readHTML(client_id: int, blog_id: str, version_number: int) -> dict:
     """
     Fetches a specific HTML version from the database.
     
     Args:
         client_id (int): The client ID.
-        blog_id (int): The blog idea ID.
+        blog_id (str): The blog idea ID as a hex string (e.g., "ccc84fd1").
         version_number (int): The version number to fetch.
     
     Returns:
@@ -126,16 +126,31 @@ def readHTML(client_id: int, blog_id: int, version_number: int) -> dict:
     """
     db = get_db_session()
     try:
+        # First, look up the blog_idea by future_idea_id to get the integer id
+        blog_idea_result = db.execute(
+            text("""
+                SELECT id FROM blog_ideas
+                WHERE future_idea_id = :blog_id AND client_id = :client_id
+            """),
+            {"blog_id": blog_id, "client_id": client_id}
+        ).fetchone()
+        
+        if not blog_idea_result:
+            raise ValueError(f"Blog idea not found for client_id={client_id}, blog_id={blog_id}")
+        
+        blog_idea_id_int = blog_idea_result[0]
+        
+        # Now fetch the HTML artifact
         result = db.execute(
             text("""
                 SELECT client_id, blog_idea_id, version_number, html
                 FROM html_artifacts
                 WHERE client_id = :client_id
-                  AND blog_idea_id = :blog_id
+                  AND blog_idea_id = :blog_idea_id_int
                   AND version_number = :version_number
                 LIMIT 1
             """),
-            {"client_id": client_id, "blog_id": blog_id, "version_number": version_number}
+            {"client_id": client_id, "blog_idea_id_int": blog_idea_id_int, "version_number": version_number}
         ).fetchone()
         
         if not result:
@@ -143,7 +158,7 @@ def readHTML(client_id: int, blog_id: int, version_number: int) -> dict:
         
         return {
             "client_id": result[0],
-            "blog_id": result[1],
+            "blog_id": blog_id,
             "version_number": result[2],
             "html": result[3]
         }
@@ -152,13 +167,13 @@ def readHTML(client_id: int, blog_id: int, version_number: int) -> dict:
 
 
 @mcp.tool
-def writeHTML(client_id: int, blog_id: int, version_number: int, html: str) -> dict:
+def writeHTML(client_id: int, blog_id: str, version_number: int, html: str) -> dict:
     """
     Writes HTML to the database. The version number must be one higher than the current maximum version.
     
     Args:
         client_id (int): The client ID.
-        blog_id (int): The blog idea ID.
+        blog_id (str): The blog idea ID as a hex string (e.g., "ccc84fd1").
         version_number (int): The new version number (must be current_max + 1).
         html (str): The HTML content to store.
     
@@ -167,14 +182,28 @@ def writeHTML(client_id: int, blog_id: int, version_number: int, html: str) -> d
     """
     db = get_db_session()
     try:
+        # First, look up the blog_idea by future_idea_id to get the integer id
+        blog_idea_result = db.execute(
+            text("""
+                SELECT id FROM blog_ideas
+                WHERE future_idea_id = :blog_id AND client_id = :client_id
+            """),
+            {"blog_id": blog_id, "client_id": client_id}
+        ).fetchone()
+        
+        if not blog_idea_result:
+            raise ValueError(f"Blog idea not found for client_id={client_id}, blog_id={blog_id}")
+        
+        blog_idea_id_int = blog_idea_result[0]
+        
         # Get the current maximum version number
         max_version_result = db.execute(
             text("""
                 SELECT COALESCE(MAX(version_number), 0)
                 FROM html_artifacts
-                WHERE client_id = :client_id AND blog_idea_id = :blog_id
+                WHERE client_id = :client_id AND blog_idea_id = :blog_idea_id_int
             """),
-            {"client_id": client_id, "blog_id": blog_id}
+            {"client_id": client_id, "blog_idea_id_int": blog_idea_id_int}
         ).fetchone()
         
         current_max_version = max_version_result[0] if max_version_result else 0
@@ -190,9 +219,9 @@ def writeHTML(client_id: int, blog_id: int, version_number: int, html: str) -> d
         db.execute(
             text("""
                 INSERT INTO html_artifacts (client_id, blog_idea_id, version_number, html)
-                VALUES (:client_id, :blog_id, :version_number, :html)
+                VALUES (:client_id, :blog_idea_id_int, :version_number, :html)
             """),
-            {"client_id": client_id, "blog_id": blog_id, "version_number": version_number, "html": html}
+            {"client_id": client_id, "blog_idea_id_int": blog_idea_id_int, "version_number": version_number, "html": html}
         )
         db.commit()
         

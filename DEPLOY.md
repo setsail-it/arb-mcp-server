@@ -12,8 +12,9 @@
 
 3. **Configure environment variables**
    - In Railway dashboard, go to your service → Variables
-   - Add the following environment variable:
+   - Add the following environment variables:
      - `DATAFORSEO_API_KEY` - Your DataForSEO Base64 authorization key (format: Base64 encoded "username:password")
+     - `DATABASE_URL` - Your PostgreSQL database connection string (e.g., `postgresql://user:password@host:port/dbname`)
    - Optionally set `PORT` (defaults to 8000 if not set)
 
 4. **Access the MCP endpoint**

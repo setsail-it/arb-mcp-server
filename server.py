@@ -1,8 +1,25 @@
 import os
 import requests
 from fastmcp import FastMCP
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker, Session
 
 mcp = FastMCP("Keyword MCP Server")
+
+# Database setup - create engine once
+_database_url = os.getenv("DATABASE_URL")
+_engine = None
+_SessionLocal = None
+
+if _database_url:
+    _engine = create_engine(_database_url)
+    _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+
+def get_db_session() -> Session:
+    """Get a database session."""
+    if not _SessionLocal:
+        raise ValueError("DATABASE_URL environment variable is not set.")
+    return _SessionLocal()
 
 @mcp.tool
 def get_search_volume(keyword: str, location_code: int = 2840, language_code: str = "en") -> dict:
@@ -92,6 +109,181 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
         return keyword_data
     except (KeyError, IndexError, TypeError) as e:
         raise Exception(f"Unexpected response structure from DataForSEO API: {e}. Response: {data}")
+
+
+@mcp.tool
+def readHTML(client_id: int, blog_id: int, version_number: int) -> dict:
+    """
+    Fetches a specific HTML version from the database.
+    
+    Args:
+        client_id (int): The client ID.
+        blog_id (int): The blog idea ID.
+        version_number (int): The version number to fetch.
+    
+    Returns:
+        dict: A dictionary containing client_id, blog_id, version_number, and html.
+    """
+    db = get_db_session()
+    try:
+        result = db.execute(
+            text("""
+                SELECT client_id, blog_idea_id, version_number, html
+                FROM html_artifacts
+                WHERE client_id = :client_id
+                  AND blog_idea_id = :blog_id
+                  AND version_number = :version_number
+                LIMIT 1
+            """),
+            {"client_id": client_id, "blog_id": blog_id, "version_number": version_number}
+        ).fetchone()
+        
+        if not result:
+            raise ValueError(f"HTML artifact not found for client_id={client_id}, blog_id={blog_id}, version_number={version_number}")
+        
+        return {
+            "client_id": result[0],
+            "blog_id": result[1],
+            "version_number": result[2],
+            "html": result[3]
+        }
+    finally:
+        db.close()
+
+
+@mcp.tool
+def writeHTML(client_id: int, blog_id: int, version_number: int, html: str) -> dict:
+    """
+    Writes HTML to the database. The version number must be one higher than the current maximum version.
+    
+    Args:
+        client_id (int): The client ID.
+        blog_id (int): The blog idea ID.
+        version_number (int): The new version number (must be current_max + 1).
+        html (str): The HTML content to store.
+    
+    Returns:
+        dict: A dictionary containing client_id, blog_id, and the updated version_number.
+    """
+    db = get_db_session()
+    try:
+        # Get the current maximum version number
+        max_version_result = db.execute(
+            text("""
+                SELECT COALESCE(MAX(version_number), 0)
+                FROM html_artifacts
+                WHERE client_id = :client_id AND blog_idea_id = :blog_id
+            """),
+            {"client_id": client_id, "blog_id": blog_id}
+        ).fetchone()
+        
+        current_max_version = max_version_result[0] if max_version_result else 0
+        expected_version = current_max_version + 1
+        
+        if version_number != expected_version:
+            raise ValueError(
+                f"Version number mismatch. Expected version {expected_version} "
+                f"(current max is {current_max_version}), but got {version_number}"
+            )
+        
+        # Insert the new HTML artifact
+        db.execute(
+            text("""
+                INSERT INTO html_artifacts (client_id, blog_idea_id, version_number, html)
+                VALUES (:client_id, :blog_id, :version_number, :html)
+            """),
+            {"client_id": client_id, "blog_id": blog_id, "version_number": version_number, "html": html}
+        )
+        db.commit()
+        
+        return {
+            "client_id": client_id,
+            "blog_id": blog_id,
+            "version_number": version_number
+        }
+    except Exception as e:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@mcp.tool
+def getClientOverview(client_id: int) -> dict:
+    """
+    Fetches client overview data from the client_contexts table.
+    
+    Args:
+        client_id (int): The client ID.
+    
+    Returns:
+        dict: A dictionary containing domain, call_to_action, about, competitors, 
+              ideal_target_market, company_details, and social_links.
+    """
+    db = get_db_session()
+    try:
+        result = db.execute(
+            text("""
+                SELECT domain, call_to_action, about, competitors, ideal_target_market, 
+                       company_details, social_links
+                FROM client_contexts
+                WHERE client_id = :client_id
+            """),
+            {"client_id": client_id}
+        ).fetchone()
+        
+        if not result:
+            raise ValueError(f"Client context not found for client_id={client_id}")
+        
+        return {
+            "domain": result[0],
+            "call_to_action": result[1],
+            "about": result[2],
+            "competitors": result[3],
+            "ideal_target_market": result[4],
+            "company_details": result[5],
+            "social_links": result[6]
+        }
+    finally:
+        db.close()
+
+
+@mcp.tool
+def getClientWritingRules(client_id: int) -> dict:
+    """
+    Fetches client writing rules from the client_contexts table.
+    
+    Args:
+        client_id (int): The client ID.
+    
+    Returns:
+        dict: A dictionary containing brand_pov, brand_safety, questionnaire, 
+              author_tone, and author_rules.
+    """
+    db = get_db_session()
+    try:
+        result = db.execute(
+            text("""
+                SELECT brand_pov, brand_safety, questionnaire, author_tone, author_rules
+                FROM client_contexts
+                WHERE client_id = :client_id
+            """),
+            {"client_id": client_id}
+        ).fetchone()
+        
+        if not result:
+            raise ValueError(f"Client context not found for client_id={client_id}")
+        
+        return {
+            "brand_pov": result[0],
+            "brand_safety": result[1],
+            "questionnaire": result[2],
+            "author_tone": result[3],
+            "author_rules": result[4]
+        }
+    finally:
+        db.close()
+
 
 if __name__ == "__main__":
     # Run the MCP server

@@ -1,3 +1,5 @@
 fastmcp
 requests
+sqlalchemy
+psycopg2-binary
 

@@ -1,8 +1,14 @@
 import os
+import base64
 import requests
 from fastmcp import FastMCP
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 mcp = FastMCP("Keyword MCP Server")
 
@@ -14,6 +20,29 @@ _SessionLocal = None
 if _database_url:
     _engine = create_engine(_database_url)
     _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
+
+# OpenAI client setup
+_openai_api_key = os.getenv("OPENAI_API_KEY")
+_openai_client = None
+
+if _openai_api_key:
+    _openai_client = OpenAI(api_key=_openai_api_key)
+
+# AWS S3 setup
+_aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
+_aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+_aws_region = os.getenv("AWS_REGION", "us-east-2")
+_aws_s3_bucket = os.getenv("AWS_S3_BUCKET", "arb-imgs")
+_s3_client = None
+
+if _aws_access_key_id and _aws_secret_access_key:
+    import boto3
+    _s3_client = boto3.client(
+        's3',
+        aws_access_key_id=_aws_access_key_id,
+        aws_secret_access_key=_aws_secret_access_key,
+        region_name=_aws_region
+    )
 
 def get_db_session() -> Session:
     """Get a database session."""
@@ -283,6 +312,88 @@ def getClientWritingRules(client_id: int) -> dict:
         }
     finally:
         db.close()
+
+
+@mcp.tool
+def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
+    """
+    Generates an image using OpenAI's image generation API, decodes base64 if needed,
+    and uploads it to AWS S3 for hosting.
+    
+    Args:
+        prompt (str): The text prompt describing the image to generate.
+        filename (str): The filename to use when saving the image (default: "generated_image.png").
+    
+    Returns:
+        dict: A dictionary containing the hosted image URL and other metadata.
+    """
+    if not _openai_client:
+        raise ValueError("OPENAI_API_KEY environment variable is not set.")
+    
+    if not _s3_client:
+        raise ValueError("AWS credentials not configured. Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_S3_BUCKET.")
+    
+    if not _aws_s3_bucket:
+        raise ValueError("AWS_S3_BUCKET environment variable is not set.")
+    
+    result = _openai_client.images.generate(
+        model="gpt-image-1",
+        prompt=prompt,
+        n=1,
+        size="1024x1024"
+    )
+    
+    # Handle the response - could be URL or base64
+    image_data = result.data[0] if result.data else None
+    if not image_data:
+        raise Exception("No image data returned from OpenAI API")
+    
+    # Check if response contains base64 data
+    if hasattr(image_data, 'b64_json') and image_data.b64_json:
+        # Decode base64 image
+        image_bytes = base64.b64decode(image_data.b64_json)
+    elif hasattr(image_data, 'url') and image_data.url:
+        # Download image from URL
+        response = requests.get(image_data.url)
+        response.raise_for_status()
+        image_bytes = response.content
+    else:
+        raise Exception("No image data found in response (neither b64_json nor url)")
+    
+    # Determine content type from filename extension
+    content_type = "image/png"
+    if filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg'):
+        content_type = "image/jpeg"
+    elif filename.lower().endswith('.gif'):
+        content_type = "image/gif"
+    elif filename.lower().endswith('.webp'):
+        content_type = "image/webp"
+    
+    # Upload to S3
+    try:
+        _s3_client.put_object(
+            Bucket=_aws_s3_bucket,
+            Key=filename,
+            Body=image_bytes,
+            ContentType=content_type
+            # Note: ACLs are disabled on this bucket. Make bucket public via bucket policy instead.
+        )
+        
+        # Construct the public URL
+        # Format: https://bucket-name.s3.region.amazonaws.com/filename
+        hosted_url = f"https://{_aws_s3_bucket}.s3.{_aws_region}.amazonaws.com/{filename}"
+        
+        return {
+            "url": hosted_url,
+            "filename": filename,
+            "prompt": prompt,
+            "model": "gpt-image-1",
+            "size": "1024x1024",
+            "hosting_service": "aws_s3",
+            "bucket": _aws_s3_bucket
+        }
+    except Exception as e:
+        raise Exception(f"Failed to upload image to S3: {str(e)}")
 
 
 if __name__ == "__main__":

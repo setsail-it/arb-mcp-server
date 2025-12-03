@@ -2,4 +2,7 @@ fastmcp
 requests
 sqlalchemy
 psycopg2-binary
+openai
+boto3
+python-dotenv
 

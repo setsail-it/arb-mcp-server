@@ -15,6 +15,11 @@
    - Add the following environment variables:
      - `DATAFORSEO_API_KEY` - Your DataForSEO Base64 authorization key (format: Base64 encoded "username:password")
      - `DATABASE_URL` - Your PostgreSQL database connection string (e.g., `postgresql://user:password@host:port/dbname`)
+     - `OPENAI_API_KEY` - Your OpenAI API key (required for image generation)
+     - `AWS_ACCESS_KEY_ID` - Your AWS access key ID (required for S3 image hosting)
+     - `AWS_SECRET_ACCESS_KEY` - Your AWS secret access key (required for S3 image hosting)
+     - `AWS_S3_BUCKET` - Your S3 bucket name (defaults to "arb-imgs" if not set)
+     - `AWS_REGION` - AWS region (defaults to "us-east-2" if not set)
    - Optionally set `PORT` (defaults to 8000 if not set)
 
 4. **Access the MCP endpoint**

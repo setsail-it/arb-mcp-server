@@ -4,7 +4,6 @@ import requests
 from fastmcp import FastMCP
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
-from openai import OpenAI
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -21,12 +20,9 @@ if _database_url:
     _engine = create_engine(_database_url)
     _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
 
-# OpenAI client setup
-_openai_api_key = os.getenv("OPENAI_API_KEY")
-_openai_client = None
-
-if _openai_api_key:
-    _openai_client = OpenAI(api_key=_openai_api_key)
+# Google Gemini API setup
+_google_api_key = os.getenv("GOOGLE_API_KEY")
+_google_api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent"
 
 # AWS S3 setup
 _aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
@@ -317,7 +313,7 @@ def getClientWritingRules(client_id: int) -> dict:
 @mcp.tool
 def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
     """
-    Generates an image using OpenAI's image generation API, decodes base64 if needed,
+    Generates an image using Google Gemini's image generation API, decodes base64 if needed,
     and uploads it to AWS S3 for hosting.
     
     Args:
@@ -327,8 +323,8 @@ def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
     Returns:
         dict: A dictionary containing the hosted image URL and other metadata.
     """
-    if not _openai_client:
-        raise ValueError("OPENAI_API_KEY environment variable is not set.")
+    if not _google_api_key:
+        raise ValueError("GOOGLE_API_KEY environment variable is not set.")
     
     if not _s3_client:
         raise ValueError("AWS credentials not configured. Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_S3_BUCKET.")
@@ -336,38 +332,68 @@ def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
     if not _aws_s3_bucket:
         raise ValueError("AWS_S3_BUCKET environment variable is not set.")
     
-    result = _openai_client.images.generate(
-        model="gpt-image-1",
-        prompt=prompt,
-        n=1,
-        size="1024x1024"
-    )
+    # Call Google Gemini API
+    headers = {
+        "x-goog-api-key": _google_api_key,
+        "Content-Type": "application/json"
+    }
     
-    # Handle the response - could be URL or base64
-    image_data = result.data[0] if result.data else None
-    if not image_data:
-        raise Exception("No image data returned from OpenAI API")
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": prompt
+                    }
+                ]
+            }
+        ]
+    }
     
-    # Check if response contains base64 data
-    if hasattr(image_data, 'b64_json') and image_data.b64_json:
+    response = requests.post(_google_api_url, headers=headers, json=payload)
+    response.raise_for_status()
+    
+    result = response.json()
+    
+    # Extract image data from response
+    # The image is in candidates[0].content.parts[0].inlineData.data (base64)
+    try:
+        if 'candidates' not in result or not result['candidates']:
+            raise Exception("No candidates in Google Gemini API response")
+        
+        candidate = result['candidates'][0]
+        if 'content' not in candidate or 'parts' not in candidate['content']:
+            raise Exception("No content/parts in Google Gemini API response")
+        
+        parts = candidate['content']['parts']
+        if not parts or 'inlineData' not in parts[0]:
+            raise Exception("No inlineData in Google Gemini API response")
+        
+        inline_data = parts[0]['inlineData']
+        image_base64 = inline_data.get('data')
+        mime_type = inline_data.get('mimeType', 'image/png')
+        
+        if not image_base64:
+            raise Exception("No image data in Google Gemini API response")
+        
         # Decode base64 image
-        image_bytes = base64.b64decode(image_data.b64_json)
-    elif hasattr(image_data, 'url') and image_data.url:
-        # Download image from URL
-        response = requests.get(image_data.url)
-        response.raise_for_status()
-        image_bytes = response.content
-    else:
-        raise Exception("No image data found in response (neither b64_json nor url)")
+        image_bytes = base64.b64decode(image_base64)
+        
+    except (KeyError, IndexError, TypeError) as e:
+        raise Exception(f"Unexpected response structure from Google Gemini API: {e}. Response: {result}")
     
-    # Determine content type from filename extension
-    content_type = "image/png"
-    if filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg'):
-        content_type = "image/jpeg"
-    elif filename.lower().endswith('.gif'):
-        content_type = "image/gif"
-    elif filename.lower().endswith('.webp'):
-        content_type = "image/webp"
+    # Use mime_type from API response, or fallback to filename extension
+    content_type = mime_type
+    if not content_type:
+        # Fallback to determining from filename
+        if filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg'):
+            content_type = "image/jpeg"
+        elif filename.lower().endswith('.gif'):
+            content_type = "image/gif"
+        elif filename.lower().endswith('.webp'):
+            content_type = "image/webp"
+        else:
+            content_type = "image/png"
     
     # Upload to S3
     try:
@@ -387,8 +413,8 @@ def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
             "url": hosted_url,
             "filename": filename,
             "prompt": prompt,
-            "model": "gpt-image-1",
-            "size": "1024x1024",
+            "model": "gemini-2.5-flash-image",
+            "mime_type": mime_type,
             "hosting_service": "aws_s3",
             "bucket": _aws_s3_bucket
         }

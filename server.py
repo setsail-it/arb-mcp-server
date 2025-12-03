@@ -356,25 +356,39 @@ def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
     result = response.json()
     
     # Extract image data from response
-    # The image is in candidates[0].content.parts[0].inlineData.data (base64)
+    # According to docs: response.candidates[0].content.parts - iterate through parts to find inlineData
+    # Parts can contain both text and inlineData, so we need to find the image part
     try:
         if 'candidates' not in result or not result['candidates']:
-            raise Exception("No candidates in Google Gemini API response")
+            import json
+            raise Exception(f"No candidates in Google Gemini API response. Full response: {json.dumps(result, indent=2)}")
         
         candidate = result['candidates'][0]
         if 'content' not in candidate or 'parts' not in candidate['content']:
-            raise Exception("No content/parts in Google Gemini API response")
+            import json
+            raise Exception(f"No content/parts in Google Gemini API response. Candidate: {json.dumps(candidate, indent=2)}")
         
         parts = candidate['content']['parts']
-        if not parts or 'inlineData' not in parts[0]:
-            raise Exception("No inlineData in Google Gemini API response")
+        if not parts:
+            raise Exception("Parts list is empty in Google Gemini API response")
         
-        inline_data = parts[0]['inlineData']
-        image_base64 = inline_data.get('data')
-        mime_type = inline_data.get('mimeType', 'image/png')
+        # Iterate through parts to find the one with inlineData
+        # The first part might be text, so we need to check all parts
+        image_base64 = None
+        mime_type = 'image/png'
+        
+        for part in parts:
+            if 'inlineData' in part:
+                inline_data = part['inlineData']
+                image_base64 = inline_data.get('data')
+                mime_type = inline_data.get('mimeType', 'image/png')
+                break
         
         if not image_base64:
-            raise Exception("No image data in Google Gemini API response")
+            import json
+            # Log what parts we actually got for debugging
+            part_types = [list(p.keys()) for p in parts]
+            raise Exception(f"No inlineData found in any part. Part types found: {part_types}. Full response: {json.dumps(result, indent=2)}")
         
         # Decode base64 image
         image_bytes = base64.b64decode(image_base64)

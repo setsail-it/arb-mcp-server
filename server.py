@@ -380,7 +380,8 @@ def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
         image_bytes = base64.b64decode(image_base64)
         
     except (KeyError, IndexError, TypeError) as e:
-        raise Exception(f"Unexpected response structure from Google Gemini API: {e}. Response: {result}")
+        import json
+        raise Exception(f"Unexpected response structure from Google Gemini API: {e}. Response: {json.dumps(result, indent=2)}")
     
     # Use mime_type from API response, or fallback to filename extension
     content_type = mime_type

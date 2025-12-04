@@ -1,5 +1,6 @@
 import os
 import base64
+import time
 import requests
 from fastmcp import FastMCP
 from sqlalchemy import create_engine, text
@@ -332,7 +333,7 @@ def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
     if not _aws_s3_bucket:
         raise ValueError("AWS_S3_BUCKET environment variable is not set.")
     
-    # Call Google Gemini API
+    # Call Google Gemini API with exponential backoff retry logic
     headers = {
         "x-goog-api-key": _google_api_key,
         "Content-Type": "application/json"
@@ -350,10 +351,32 @@ def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
         ]
     }
     
-    response = requests.post(_google_api_url, headers=headers, json=payload)
-    response.raise_for_status()
+    # Exponential backoff: 3 retries with delays of 1s, 2s, 4s
+    max_retries = 3
+    base_delay = 1.0  # Start with 1 second
     
-    result = response.json()
+    result = None
+    last_exception = None
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(_google_api_url, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            result = response.json()
+            break  # Success, exit retry loop
+            
+        except requests.exceptions.RequestException as e:
+            last_exception = e
+            if attempt < max_retries - 1:  # Don't sleep on last attempt
+                delay = base_delay * (2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                time.sleep(delay)
+                continue
+            else:
+                # Last attempt failed, raise the exception
+                raise Exception(f"Google Gemini API request failed after {max_retries} attempts: {str(e)}")
+    
+    if result is None:
+        raise Exception(f"Google Gemini API request failed after {max_retries} attempts: {str(last_exception)}")
     
     # Extract image data from response
     # According to docs: response.candidates[0].content.parts - iterate through parts to find inlineData

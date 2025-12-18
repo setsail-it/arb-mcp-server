@@ -1,7 +1,10 @@
 import os
 import base64
+import json
 import time
+import secrets
 import requests
+from typing import Optional
 from fastmcp import FastMCP
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
@@ -237,7 +240,7 @@ def writeHTML(client_id: int, blog_id: int, version_number: int, html: str) -> d
 @mcp.tool
 def getClientOverview(client_id: int) -> dict:
     """
-    Fetches client overview data from the client_contexts table.
+    Fetches client overview data from the general_contexts table (formerly client_contexts).
     
     Args:
         client_id (int): The client ID.
@@ -252,7 +255,7 @@ def getClientOverview(client_id: int) -> dict:
             text("""
                 SELECT domain, call_to_action, about, competitors, ideal_target_market, 
                        company_details, social_links
-                FROM client_contexts
+                FROM general_contexts
                 WHERE client_id = :client_id
             """),
             {"client_id": client_id}
@@ -277,7 +280,7 @@ def getClientOverview(client_id: int) -> dict:
 @mcp.tool
 def getClientWritingRules(client_id: int) -> dict:
     """
-    Fetches client writing rules from the client_contexts table.
+    Fetches client writing rules from the general_contexts table (formerly client_contexts).
     
     Args:
         client_id (int): The client ID.
@@ -291,7 +294,7 @@ def getClientWritingRules(client_id: int) -> dict:
         result = db.execute(
             text("""
                 SELECT brand_pov, brand_safety, questionnaire, author_tone, author_rules
-                FROM client_contexts
+                FROM general_contexts
                 WHERE client_id = :client_id
             """),
             {"client_id": client_id}
@@ -458,6 +461,626 @@ def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
         }
     except Exception as e:
         raise Exception(f"Failed to upload image to S3: {str(e)}")
+
+
+@mcp.tool
+def update_discovery_document(
+    client_id: int,
+    # Domain
+    domain: Optional[str] = None,
+    # Section 0: Meta/Header
+    client_name: Optional[str] = None,
+    discovery_date: Optional[str] = None,
+    contact_name: Optional[str] = None,
+    contact_title: Optional[str] = None,
+    contact_email: Optional[str] = None,
+    contact_phone: Optional[str] = None,
+    industry: Optional[str] = None,
+    # Section 1: Company Overview & Business Objectives
+    primary_business: Optional[str] = None,
+    years_in_business: Optional[str] = None,
+    annual_revenue: Optional[str] = None,
+    num_employees: Optional[int] = None,
+    geographic_market: Optional[str] = None,
+    primary_goal_12_months: Optional[str] = None,
+    target_leads_per_month: Optional[int] = None,
+    target_leads_timeframe: Optional[str] = None,
+    target_cpl_amount: Optional[str] = None,
+    target_cpl_reasoning: Optional[str] = None,
+    qualified_lead_definition: Optional[str] = None,
+    customer_ltv: Optional[str] = None,
+    customer_ltv_calculation: Optional[str] = None,
+    sales_cycle_length: Optional[str] = None,
+    close_rate_percent: Optional[str] = None,
+    close_rate_not_tracked: Optional[bool] = None,
+    current_monthly_leads: Optional[int] = None,
+    current_lead_generation_method: Optional[str] = None,
+    current_sql_percent: Optional[str] = None,
+    previous_marketing_efforts: Optional[str] = None,  # JSON string
+    what_is_working: Optional[str] = None,
+    budget_monthly: Optional[str] = None,
+    budget_quarterly: Optional[str] = None,
+    budget_annual: Optional[str] = None,
+    leadgen_budget_monthly: Optional[str] = None,
+    leadgen_budget_quarterly: Optional[str] = None,
+    leadgen_budget_annual: Optional[str] = None,
+    seasonal_peak_months: Optional[str] = None,
+    seasonal_slow_months: Optional[str] = None,
+    seasonal_details: Optional[str] = None,
+    # Section 2: Target Audience
+    ideal_customer_description: Optional[str] = None,
+    decision_maker_titles: Optional[str] = None,
+    decision_authority_level: Optional[str] = None,
+    target_company_size: Optional[str] = None,
+    target_industries: Optional[str] = None,
+    geographic_focus: Optional[str] = None,
+    customer_age_range: Optional[str] = None,
+    customer_gender: Optional[str] = None,
+    customer_education: Optional[str] = None,
+    customer_income_range: Optional[str] = None,
+    pain_point_1: Optional[str] = None,
+    pain_point_2: Optional[str] = None,
+    pain_point_3: Optional[str] = None,
+    goal_motivation_1: Optional[str] = None,
+    goal_motivation_2: Optional[str] = None,
+    goal_motivation_3: Optional[str] = None,
+    buying_process: Optional[str] = None,
+    secondary_audiences: Optional[str] = None,  # JSON string
+    # Section 3: Value Proposition & Messaging
+    differentiation: Optional[str] = None,
+    value_prop_1: Optional[str] = None,
+    value_prop_2: Optional[str] = None,
+    value_prop_3: Optional[str] = None,
+    why_choose_us: Optional[str] = None,
+    market_perception: Optional[str] = None,
+    brand_voice_tones: Optional[str] = None,  # JSON array string
+    brand_voice_other: Optional[str] = None,
+    messaging_theme_1: Optional[str] = None,
+    messaging_theme_2: Optional[str] = None,
+    messaging_theme_3: Optional[str] = None,
+    testimonials_available: Optional[str] = None,
+    testimonials_count: Optional[int] = None,
+    testimonials_examples: Optional[str] = None,
+    proof_customer_stories: Optional[str] = None,
+    proof_statistics: Optional[str] = None,
+    proof_awards: Optional[str] = None,
+    proof_notable_customers: Optional[str] = None,
+    # Section 4: Competitive Landscape
+    competitor_1: Optional[str] = None,
+    competitor_2: Optional[str] = None,
+    competitor_3: Optional[str] = None,
+    competitor_channels: Optional[str] = None,  # JSON string
+    competitor_strengths: Optional[str] = None,
+    competitive_advantages: Optional[str] = None,
+    # Section 5: SetSail Services Assessment
+    services_interested: Optional[str] = None,  # JSON array string
+    services_interest_reasons: Optional[str] = None,  # JSON object string
+    google_ads_used: Optional[bool] = None,
+    google_ads_experience: Optional[str] = None,
+    meta_ads_used: Optional[bool] = None,
+    meta_ads_experience: Optional[str] = None,
+    social_media_used: Optional[bool] = None,
+    social_media_experience: Optional[str] = None,
+    seo_used: Optional[bool] = None,
+    seo_experience: Optional[str] = None,
+    website_dev_used: Optional[bool] = None,
+    website_dev_experience: Optional[str] = None,
+    services_not_wanted: Optional[bool] = None,
+    services_not_wanted_details: Optional[str] = None,
+    # Section 6: Current Digital Presence
+    has_website: Optional[bool] = None,
+    website_url: Optional[str] = None,
+    website_status: Optional[str] = None,  # JSON array string
+    website_status_other: Optional[str] = None,
+    website_monthly_visitors: Optional[int] = None,
+    website_conversion_rate: Optional[str] = None,
+    website_main_issues: Optional[str] = None,
+    social_platforms: Optional[str] = None,  # JSON string
+    social_strategy: Optional[str] = None,
+    # Section 7: Analytics & Tracking
+    analytics_tools: Optional[str] = None,  # JSON array string
+    analytics_other: Optional[str] = None,
+    crm_name: Optional[str] = None,
+    crm_features_used: Optional[str] = None,
+    lead_data_tracked: Optional[str] = None,
+    conversion_tracking_status: Optional[str] = None,
+    conversion_tracking_details: Optional[str] = None,
+    crm_integration_possible: Optional[str] = None,
+    crm_integration_details: Optional[str] = None,
+    # Section 8: Current Tech Stack
+    tools_used: Optional[str] = None,  # JSON array string
+    tools_other: Optional[str] = None,
+    # Section 9: Team & Support
+    poc_name: Optional[str] = None,
+    poc_title: Optional[str] = None,
+    poc_email: Optional[str] = None,
+    poc_phone: Optional[str] = None,
+    poc_availability: Optional[str] = None,
+    other_stakeholders: Optional[str] = None,  # JSON string
+    final_decision_name: Optional[str] = None,
+    final_decision_title: Optional[str] = None,
+    decision_timeline: Optional[str] = None,
+    resources_available: Optional[str] = None,  # JSON array string
+    resources_other: Optional[str] = None,
+    has_dev_support: Optional[bool] = None,
+    has_marketing_support: Optional[bool] = None,
+    has_sales_support: Optional[bool] = None,
+    internal_resources_other: Optional[str] = None,
+    # Section 10: Timeline & Expectations
+    target_launch_date: Optional[str] = None,
+    urgency_level: Optional[str] = None,
+    first_leads_timeframe: Optional[str] = None,
+    ramp_up_timeframe: Optional[str] = None,
+    full_results_timeframe: Optional[str] = None,
+    success_indicator_1: Optional[str] = None,
+    success_indicator_2: Optional[str] = None,
+    success_indicator_3: Optional[str] = None,
+    exceed_expectations: Optional[str] = None,
+    concern_1: Optional[str] = None,
+    concern_2: Optional[str] = None,
+    concern_3: Optional[str] = None,
+    # Section 11: Additional Information
+    regulatory_considerations: Optional[str] = None,  # JSON array string
+    regulatory_other: Optional[str] = None,
+    industry_keywords: Optional[str] = None,
+    is_seasonal: Optional[bool] = None,
+    seasonality_peak: Optional[str] = None,
+    seasonality_slow: Optional[str] = None,
+    seasonality_strategy: Optional[str] = None,
+    anything_else: Optional[str] = None,
+    success_definition: Optional[str] = None,
+    case_study_consent: Optional[str] = None,
+) -> dict:
+    """
+    Updates or creates a discovery document for a client. All fields except client_id are optional.
+    Only provide fields you have researched and are confident about - leave others as None.
+    
+    This tool allows LLMs to research a company's domain and fill in discovery document fields
+    with information gathered from their website, public records, and other sources.
+    
+    Args:
+        client_id (int): Required. The client ID to update the discovery document for.
+        domain (str): The client's domain name (e.g., "acme.com").
+        
+        --- SECTION 0: META/HEADER ---
+        client_name (str): Company/client name.
+        discovery_date (str): Date of discovery in YYYY-MM-DD format.
+        contact_name (str): Primary contact person's name.
+        contact_title (str): Primary contact's job title.
+        contact_email (str): Primary contact's email.
+        contact_phone (str): Primary contact's phone number.
+        industry (str): The industry the company operates in.
+        
+        --- SECTION 1: COMPANY OVERVIEW & BUSINESS OBJECTIVES ---
+        primary_business (str): Company's primary business/service offering description.
+        years_in_business (str): How long the company has been in business.
+        annual_revenue (str): Current annual revenue or revenue range (e.g., "$1-3M").
+        num_employees (int): Number of employees.
+        geographic_market (str): Geographic service area/market.
+        primary_goal_12_months (str): Primary business goal for the next 12 months.
+        target_leads_per_month (int): Target number of leads per month.
+        target_leads_timeframe (str): Timeframe for achieving target leads.
+        target_cpl_amount (str): Target cost per lead amount.
+        target_cpl_reasoning (str): How the target CPL was determined.
+        qualified_lead_definition (str): What defines a "qualified lead" for this business.
+        customer_ltv (str): Estimated customer lifetime value.
+        customer_ltv_calculation (str): How LTV is calculated.
+        sales_cycle_length (str): Typical sales cycle length (e.g., "6-8 weeks").
+        close_rate_percent (str): Percentage of leads that close.
+        close_rate_not_tracked (bool): Whether close rate is currently tracked.
+        current_monthly_leads (int): Current number of monthly leads.
+        current_lead_generation_method (str): How leads are currently generated.
+        current_sql_percent (str): Percentage of leads that are sales-qualified.
+        previous_marketing_efforts (str): JSON array of previous marketing efforts with fields: channel_name, timeframe, result, why_worked.
+        what_is_working (str): What is currently working in their marketing.
+        budget_monthly (str): Total monthly marketing budget.
+        budget_quarterly (str): Total quarterly marketing budget.
+        budget_annual (str): Total annual marketing budget.
+        leadgen_budget_monthly (str): Monthly budget allocated to lead generation.
+        leadgen_budget_quarterly (str): Quarterly budget for lead generation.
+        leadgen_budget_annual (str): Annual budget for lead generation.
+        seasonal_peak_months (str): Peak business months.
+        seasonal_slow_months (str): Slow business months.
+        seasonal_details (str): Details about seasonality.
+        
+        --- SECTION 2: TARGET AUDIENCE ---
+        ideal_customer_description (str): Description of the ideal customer.
+        decision_maker_titles (str): Job titles of decision makers.
+        decision_authority_level (str): Decision authority level (C-Suite, Director, Manager, Other).
+        target_company_size (str): Target company size (employees or revenue range).
+        target_industries (str): List of target industries.
+        geographic_focus (str): Geographic focus for customers.
+        customer_age_range (str): Target customer age range.
+        customer_gender (str): Target gender (All, Specific).
+        customer_education (str): Education level (High school, Bachelor's, Advanced, Any).
+        customer_income_range (str): Income/budget authority range.
+        pain_point_1 (str): Main customer pain point #1.
+        pain_point_2 (str): Main customer pain point #2.
+        pain_point_3 (str): Main customer pain point #3.
+        goal_motivation_1 (str): Customer goal/motivation #1.
+        goal_motivation_2 (str): Customer goal/motivation #2.
+        goal_motivation_3 (str): Customer goal/motivation #3.
+        buying_process (str): Typical buying process description.
+        secondary_audiences (str): JSON array of secondary audiences with fields: description, job_titles, why_target.
+        
+        --- SECTION 3: VALUE PROPOSITION & MESSAGING ---
+        differentiation (str): What makes the business different from competitors.
+        value_prop_1 (str): Top value proposition #1.
+        value_prop_2 (str): Top value proposition #2.
+        value_prop_3 (str): Top value proposition #3.
+        why_choose_us (str): Why prospects should choose them over competitors.
+        market_perception (str): How they want to be perceived in the market.
+        brand_voice_tones (str): JSON array of brand voice/tone selections from: "Professional / Corporate", "Casual / Conversational", "Educational / Thought Leadership", "Results-Driven / ROI-Focused", "Innovative / Forward-Thinking", "Supportive / Customer-Centric".
+        brand_voice_other (str): Other brand voice description if applicable.
+        messaging_theme_1 (str): Key messaging theme #1.
+        messaging_theme_2 (str): Key messaging theme #2.
+        messaging_theme_3 (str): Key messaging theme #3.
+        testimonials_available (str): Whether testimonials are available (Yes, Some, No).
+        testimonials_count (int): Number of testimonials/case studies available.
+        testimonials_examples (str): Examples or descriptions of testimonials.
+        proof_customer_stories (str): Customer success stories.
+        proof_statistics (str): Relevant statistics/metrics.
+        proof_awards (str): Awards/certifications.
+        proof_notable_customers (str): Notable customers.
+        
+        --- SECTION 4: COMPETITIVE LANDSCAPE ---
+        competitor_1 (str): Main competitor #1 name.
+        competitor_2 (str): Main competitor #2 name.
+        competitor_3 (str): Main competitor #3 name.
+        competitor_channels (str): JSON array of competitor channel info with fields: name, google_ads, meta_ads, social_media, seo_content, website_quality, other_channels.
+        competitor_strengths (str): What competitors are doing well.
+        competitive_advantages (str): Where they have competitive advantages.
+        
+        --- SECTION 5: SETSAIL SERVICES ASSESSMENT ---
+        services_interested (str): JSON array of services interested in: "google_ads", "meta_ads", "social_media", "seo", "website_dev".
+        services_interest_reasons (str): JSON object mapping service to reason for interest.
+        google_ads_used (bool): Whether Google Ads has been used before.
+        google_ads_experience (str): Google Ads experience level (Beginner, Intermediate, Advanced, N/A).
+        meta_ads_used (bool): Whether Meta Ads has been used before.
+        meta_ads_experience (str): Meta Ads experience level.
+        social_media_used (bool): Whether social media marketing has been used.
+        social_media_experience (str): Social media experience level.
+        seo_used (bool): Whether SEO has been used before.
+        seo_experience (str): SEO experience level.
+        website_dev_used (bool): Whether website development services were used.
+        website_dev_experience (str): Website development experience level.
+        services_not_wanted (bool): Whether there are services they specifically don't want.
+        services_not_wanted_details (str): Details on services not wanted and why.
+        
+        --- SECTION 6: CURRENT DIGITAL PRESENCE ---
+        has_website (bool): Whether they currently have a website.
+        website_url (str): Website URL.
+        website_status (str): JSON array of website status selections: "Recently built", "Needs updating / redesign", "Being built".
+        website_status_other (str): Other website status description.
+        website_monthly_visitors (int): Monthly website visitors.
+        website_conversion_rate (str): Website conversion rate.
+        website_main_issues (str): Main website issues.
+        social_platforms (str): JSON array of social platforms with fields: platform, followers, activity_level, primary_goal.
+        social_strategy (str): Current social media strategy description.
+        
+        --- SECTION 7: ANALYTICS & TRACKING ---
+        analytics_tools (str): JSON array of analytics tools used: "Google Analytics 4", "Google Analytics (Universal Analytics)", "None currently".
+        analytics_other (str): Other analytics tools.
+        crm_name (str): CRM/lead management system name.
+        crm_features_used (str): CRM features being used.
+        lead_data_tracked (str): What lead data is tracked.
+        conversion_tracking_status (str): Conversion tracking status (Yes – Fully set up, Partially set up, No – Needs to be set up).
+        conversion_tracking_details (str): Details on conversion tracking setup.
+        crm_integration_possible (str): Whether CRM integration is possible (Yes – CRM supports integrations, Unsure, No – Manual lead entry only).
+        crm_integration_details (str): Details on CRM integration possibilities.
+        
+        --- SECTION 8: CURRENT TECH STACK ---
+        tools_used (str): JSON array of tools used: "Google Workspace (Gmail, Docs, Sheets)", "Microsoft 365", "Slack", "Monday.com", "Asana", "Salesforce", "HubSpot", "Zapier".
+        tools_other (str): Other tools used.
+        
+        --- SECTION 9: TEAM & SUPPORT ---
+        poc_name (str): Primary point of contact name.
+        poc_title (str): Primary point of contact title.
+        poc_email (str): Primary point of contact email.
+        poc_phone (str): Primary point of contact phone.
+        poc_availability (str): POC availability (days/hours).
+        other_stakeholders (str): JSON array of other stakeholders with fields: name, title, role, email.
+        final_decision_name (str): Name of final decision authority.
+        final_decision_title (str): Title of final decision authority.
+        decision_timeline (str): Typical decision timeline.
+        resources_available (str): JSON array of available resources: "Brand guidelines / style guide", "Product / service information documents", etc.
+        resources_other (str): Other resources available.
+        has_dev_support (bool): Whether developer/IT support is available.
+        has_marketing_support (bool): Whether marketing support is available.
+        has_sales_support (bool): Whether sales support is available.
+        internal_resources_other (str): Other internal resources.
+        
+        --- SECTION 10: TIMELINE & EXPECTATIONS ---
+        target_launch_date (str): Target strategy launch date (YYYY-MM-DD).
+        urgency_level (str): How urgent (Very flexible, Moderate, Fast, Urgent).
+        first_leads_timeframe (str): Timeframe for first leads.
+        ramp_up_timeframe (str): Timeframe for performance ramp-up.
+        full_results_timeframe (str): Timeframe for full results.
+        success_indicator_1 (str): Success indicator #1 for first 90 days.
+        success_indicator_2 (str): Success indicator #2.
+        success_indicator_3 (str): Success indicator #3.
+        exceed_expectations (str): What would exceed expectations.
+        concern_1 (str): Biggest concern #1.
+        concern_2 (str): Biggest concern #2.
+        concern_3 (str): Biggest concern #3.
+        
+        --- SECTION 11: ADDITIONAL INFORMATION ---
+        regulatory_considerations (str): JSON array of regulatory considerations: "HIPAA (Healthcare)", "GDPR / Privacy regulations", "Financial services regulations", "Advertising restrictions", "None".
+        regulatory_other (str): Other regulatory considerations.
+        industry_keywords (str): Industry-specific keywords/terminology.
+        is_seasonal (bool): Whether the business is seasonal.
+        seasonality_peak (str): Peak season months if seasonal.
+        seasonality_slow (str): Slow season months if seasonal.
+        seasonality_strategy (str): How seasonality should affect strategy.
+        anything_else (str): Anything else to know about the business/goals.
+        success_definition (str): What would make the engagement successful.
+        case_study_consent (str): Consent to use results as case study (Yes, Maybe – ask later, No).
+    
+    Returns:
+        dict: A dictionary containing status, client_id, and the number of fields updated.
+    """
+    db = get_db_session()
+    try:
+        # Check if discovery document exists for this client
+        existing = db.execute(
+            text("SELECT id FROM discovery_documents WHERE client_id = :client_id"),
+            {"client_id": client_id}
+        ).fetchone()
+        
+        # Build the update data - only include non-None values
+        update_data = {}
+        
+        # Helper to parse JSON strings for array/object fields
+        def parse_json_field(value: Optional[str]):
+            if value is None:
+                return None
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value  # Return as-is if not valid JSON
+        
+        # Map all parameters to their database column names
+        field_mappings = {
+            "domain": domain,
+            "client_name": client_name,
+            "discovery_date": discovery_date,
+            "contact_name": contact_name,
+            "contact_title": contact_title,
+            "contact_email": contact_email,
+            "contact_phone": contact_phone,
+            "industry": industry,
+            "primary_business": primary_business,
+            "years_in_business": years_in_business,
+            "annual_revenue": annual_revenue,
+            "num_employees": num_employees,
+            "geographic_market": geographic_market,
+            "primary_goal_12_months": primary_goal_12_months,
+            "target_leads_per_month": target_leads_per_month,
+            "target_leads_timeframe": target_leads_timeframe,
+            "target_cpl_amount": target_cpl_amount,
+            "target_cpl_reasoning": target_cpl_reasoning,
+            "qualified_lead_definition": qualified_lead_definition,
+            "customer_ltv": customer_ltv,
+            "customer_ltv_calculation": customer_ltv_calculation,
+            "sales_cycle_length": sales_cycle_length,
+            "close_rate_percent": close_rate_percent,
+            "close_rate_not_tracked": close_rate_not_tracked,
+            "current_monthly_leads": current_monthly_leads,
+            "current_lead_generation_method": current_lead_generation_method,
+            "current_sql_percent": current_sql_percent,
+            "what_is_working": what_is_working,
+            "budget_monthly": budget_monthly,
+            "budget_quarterly": budget_quarterly,
+            "budget_annual": budget_annual,
+            "leadgen_budget_monthly": leadgen_budget_monthly,
+            "leadgen_budget_quarterly": leadgen_budget_quarterly,
+            "leadgen_budget_annual": leadgen_budget_annual,
+            "seasonal_peak_months": seasonal_peak_months,
+            "seasonal_slow_months": seasonal_slow_months,
+            "seasonal_details": seasonal_details,
+            "ideal_customer_description": ideal_customer_description,
+            "decision_maker_titles": decision_maker_titles,
+            "decision_authority_level": decision_authority_level,
+            "target_company_size": target_company_size,
+            "target_industries": target_industries,
+            "geographic_focus": geographic_focus,
+            "customer_age_range": customer_age_range,
+            "customer_gender": customer_gender,
+            "customer_education": customer_education,
+            "customer_income_range": customer_income_range,
+            "pain_point_1": pain_point_1,
+            "pain_point_2": pain_point_2,
+            "pain_point_3": pain_point_3,
+            "goal_motivation_1": goal_motivation_1,
+            "goal_motivation_2": goal_motivation_2,
+            "goal_motivation_3": goal_motivation_3,
+            "buying_process": buying_process,
+            "differentiation": differentiation,
+            "value_prop_1": value_prop_1,
+            "value_prop_2": value_prop_2,
+            "value_prop_3": value_prop_3,
+            "why_choose_us": why_choose_us,
+            "market_perception": market_perception,
+            "brand_voice_other": brand_voice_other,
+            "messaging_theme_1": messaging_theme_1,
+            "messaging_theme_2": messaging_theme_2,
+            "messaging_theme_3": messaging_theme_3,
+            "testimonials_available": testimonials_available,
+            "testimonials_count": testimonials_count,
+            "testimonials_examples": testimonials_examples,
+            "proof_customer_stories": proof_customer_stories,
+            "proof_statistics": proof_statistics,
+            "proof_awards": proof_awards,
+            "proof_notable_customers": proof_notable_customers,
+            "competitor_1": competitor_1,
+            "competitor_2": competitor_2,
+            "competitor_3": competitor_3,
+            "competitor_strengths": competitor_strengths,
+            "competitive_advantages": competitive_advantages,
+            "google_ads_used": google_ads_used,
+            "google_ads_experience": google_ads_experience,
+            "meta_ads_used": meta_ads_used,
+            "meta_ads_experience": meta_ads_experience,
+            "social_media_used": social_media_used,
+            "social_media_experience": social_media_experience,
+            "seo_used": seo_used,
+            "seo_experience": seo_experience,
+            "website_dev_used": website_dev_used,
+            "website_dev_experience": website_dev_experience,
+            "services_not_wanted": services_not_wanted,
+            "services_not_wanted_details": services_not_wanted_details,
+            "has_website": has_website,
+            "website_url": website_url,
+            "website_status_other": website_status_other,
+            "website_monthly_visitors": website_monthly_visitors,
+            "website_conversion_rate": website_conversion_rate,
+            "website_main_issues": website_main_issues,
+            "social_strategy": social_strategy,
+            "analytics_other": analytics_other,
+            "crm_name": crm_name,
+            "crm_features_used": crm_features_used,
+            "lead_data_tracked": lead_data_tracked,
+            "conversion_tracking_status": conversion_tracking_status,
+            "conversion_tracking_details": conversion_tracking_details,
+            "crm_integration_possible": crm_integration_possible,
+            "crm_integration_details": crm_integration_details,
+            "tools_other": tools_other,
+            "poc_name": poc_name,
+            "poc_title": poc_title,
+            "poc_email": poc_email,
+            "poc_phone": poc_phone,
+            "poc_availability": poc_availability,
+            "final_decision_name": final_decision_name,
+            "final_decision_title": final_decision_title,
+            "decision_timeline": decision_timeline,
+            "resources_other": resources_other,
+            "has_dev_support": has_dev_support,
+            "has_marketing_support": has_marketing_support,
+            "has_sales_support": has_sales_support,
+            "internal_resources_other": internal_resources_other,
+            "target_launch_date": target_launch_date,
+            "urgency_level": urgency_level,
+            "first_leads_timeframe": first_leads_timeframe,
+            "ramp_up_timeframe": ramp_up_timeframe,
+            "full_results_timeframe": full_results_timeframe,
+            "success_indicator_1": success_indicator_1,
+            "success_indicator_2": success_indicator_2,
+            "success_indicator_3": success_indicator_3,
+            "exceed_expectations": exceed_expectations,
+            "concern_1": concern_1,
+            "concern_2": concern_2,
+            "concern_3": concern_3,
+            "regulatory_other": regulatory_other,
+            "industry_keywords": industry_keywords,
+            "is_seasonal": is_seasonal,
+            "seasonality_peak": seasonality_peak,
+            "seasonality_slow": seasonality_slow,
+            "seasonality_strategy": seasonality_strategy,
+            "anything_else": anything_else,
+            "success_definition": success_definition,
+            "case_study_consent": case_study_consent,
+        }
+        
+        # JSON fields that need parsing
+        json_field_mappings = {
+            "previous_marketing_efforts": previous_marketing_efforts,
+            "secondary_audiences": secondary_audiences,
+            "brand_voice_tones": brand_voice_tones,
+            "competitor_channels": competitor_channels,
+            "services_interested": services_interested,
+            "services_interest_reasons": services_interest_reasons,
+            "website_status": website_status,
+            "social_platforms": social_platforms,
+            "analytics_tools": analytics_tools,
+            "tools_used": tools_used,
+            "other_stakeholders": other_stakeholders,
+            "resources_available": resources_available,
+            "regulatory_considerations": regulatory_considerations,
+        }
+        
+        # Add non-None simple fields
+        for field, value in field_mappings.items():
+            if value is not None:
+                update_data[field] = value
+        
+        # Add non-None JSON fields (parse them first)
+        for field, value in json_field_mappings.items():
+            if value is not None:
+                parsed = parse_json_field(value)
+                if parsed is not None:
+                    update_data[field] = json.dumps(parsed) if not isinstance(parsed, str) else parsed
+        
+        if not update_data:
+            return {
+                "status": "no_changes",
+                "client_id": client_id,
+                "message": "No fields provided to update"
+            }
+        
+        if existing:
+            # Update existing document
+            set_clauses = ", ".join([f"{k} = :{k}" for k in update_data.keys()])
+            update_data["client_id"] = client_id
+            db.execute(
+                text(f"UPDATE discovery_documents SET {set_clauses}, updated_at = NOW() WHERE client_id = :client_id"),
+                update_data
+            )
+            action = "updated"
+        else:
+            # Create new document
+            update_data["client_id"] = client_id
+            update_data["edit_token"] = secrets.token_urlsafe(32)
+            columns = ", ".join(update_data.keys())
+            placeholders = ", ".join([f":{k}" for k in update_data.keys()])
+            db.execute(
+                text(f"INSERT INTO discovery_documents ({columns}) VALUES ({placeholders})"),
+                update_data
+            )
+            action = "created"
+        
+        db.commit()
+        
+        return {
+            "status": "success",
+            "action": action,
+            "client_id": client_id,
+            "fields_updated": len(update_data) - (2 if action == "created" else 1),  # Exclude client_id and edit_token from count
+            "field_names": list(k for k in update_data.keys() if k not in ("client_id", "edit_token"))
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise Exception(f"Failed to update discovery document: {str(e)}")
+    finally:
+        db.close()
+
+
+@mcp.tool
+def get_discovery_document(client_id: int) -> dict:
+    """
+    Fetches the discovery document for a client.
+    
+    Args:
+        client_id (int): The client ID.
+    
+    Returns:
+        dict: The discovery document data including all fields.
+    """
+    db = get_db_session()
+    try:
+        result = db.execute(
+            text("SELECT * FROM discovery_documents WHERE client_id = :client_id"),
+            {"client_id": client_id}
+        ).fetchone()
+        
+        if not result:
+            raise ValueError(f"Discovery document not found for client_id={client_id}")
+        
+        # Convert row to dictionary
+        columns = result._mapping.keys()
+        return {col: result._mapping[col] for col in columns}
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

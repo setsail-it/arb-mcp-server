@@ -1008,7 +1008,11 @@ def update_discovery_document(
             if value is not None:
                 parsed = parse_json_field(value)
                 if parsed is not None:
-                    update_data[field] = json.dumps(parsed) if not isinstance(parsed, str) else parsed
+                    # If parsing failed and we got a plain string back,
+                    # wrap it in an array since these fields expect arrays
+                    if isinstance(parsed, str):
+                        parsed = [parsed]
+                    update_data[field] = json.dumps(parsed)
         
         if not update_data:
             return {

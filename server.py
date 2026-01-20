@@ -1235,24 +1235,6 @@ def _update_strategy_section(client_id: int, version_number: int, section_key: s
         db.close()
 
 
-def _generate_section_stub(section_key: str, section_name: str, current_content: str | None, instructions: str | None) -> str:
-    """
-    Stub for OpenAI section generation - to be replaced with real prompts.
-    
-    In the future, this will call OpenAI with the appropriate section prompt.
-    For now, it returns a placeholder indicating the section was "regenerated".
-    """
-    # TODO: Replace with actual OpenAI call using section-specific prompts
-    # The real implementation will:
-    # 1. Load the section-specific prompt from SECTION_PROMPTS
-    # 2. Fetch client knowledge (DD, GC, etc.)
-    # 3. Call OpenAI to generate the section
-    # 4. Return the generated content
-    
-    if instructions:
-        return f"[STUB - Section regenerated with instructions: {instructions}]\n\n{current_content or ''}"
-    else:
-        return f"[STUB - Section {section_name} regenerated]\n\n{current_content or ''}"
 
 
 def _assemble_full_strategy(strategy: dict) -> str:
@@ -1424,396 +1406,279 @@ def createStrategy(client_id: int, copy_from_version: Optional[int] = None) -> d
 
 
 # --- Edit tools for each section ---
+# These tools take the content directly and write it to the database.
+# The AI agent (The Cook) generates the content and calls these tools.
 
 @mcp.tool
-def editStrategyExecutiveSummary(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategyExecutiveSummary(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits the Executive Summary section of a strategy.
+    Updates the Executive Summary section of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("executive_summary")
-    new_content = _generate_section_stub("executive_summary", "Executive Summary", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "executive_summary", new_content)
+    return _update_strategy_section(client_id, version_number, "executive_summary", content)
 
 
 @mcp.tool
-def editStrategySection1(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection1(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 1: Strategic Foundation of a strategy.
+    Updates Section 1: Strategic Foundation of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_1")
-    new_content = _generate_section_stub("section_1", "Strategic Foundation", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_1", new_content)
+    return _update_strategy_section(client_id, version_number, "section_1", content)
 
 
 @mcp.tool
-def editStrategySection2(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection2(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 2: Market & Competitive Analysis of a strategy.
+    Updates Section 2: Market & Competitive Analysis of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_2")
-    new_content = _generate_section_stub("section_2", "Market & Competitive Analysis", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_2", new_content)
+    return _update_strategy_section(client_id, version_number, "section_2", content)
 
 
 @mcp.tool
-def editStrategySection3(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection3(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 3: Audience Intelligence of a strategy.
+    Updates Section 3: Audience Intelligence of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_3")
-    new_content = _generate_section_stub("section_3", "Audience Intelligence", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_3", new_content)
+    return _update_strategy_section(client_id, version_number, "section_3", content)
 
 
 @mcp.tool
-def editStrategySection4(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection4(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 4: Value Proposition & Messaging of a strategy.
+    Updates Section 4: Value Proposition & Messaging of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_4")
-    new_content = _generate_section_stub("section_4", "Value Proposition & Messaging", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_4", new_content)
+    return _update_strategy_section(client_id, version_number, "section_4", content)
 
 
 @mcp.tool
-def editStrategySection5(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection5(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 5: Setsail Services Overview of a strategy.
+    Updates Section 5: Setsail Services Overview of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_5")
-    new_content = _generate_section_stub("section_5", "Setsail Services Overview", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_5", new_content)
+    return _update_strategy_section(client_id, version_number, "section_5", content)
 
 
 @mcp.tool
-def editStrategySection6(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection6(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 6: Google Ads Management of a strategy.
+    Updates Section 6: Google Ads Management of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_6")
-    new_content = _generate_section_stub("section_6", "Google Ads Management", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_6", new_content)
+    return _update_strategy_section(client_id, version_number, "section_6", content)
 
 
 @mcp.tool
-def editStrategySection7(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection7(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 7: Social Media Management of a strategy.
+    Updates Section 7: Social Media Management of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_7")
-    new_content = _generate_section_stub("section_7", "Social Media Management", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_7", new_content)
+    return _update_strategy_section(client_id, version_number, "section_7", content)
 
 
 @mcp.tool
-def editStrategySection8(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection8(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 8: SEO Services of a strategy.
+    Updates Section 8: SEO Services of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_8")
-    new_content = _generate_section_stub("section_8", "SEO Services", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_8", new_content)
+    return _update_strategy_section(client_id, version_number, "section_8", content)
 
 
 @mcp.tool
-def editStrategySection9(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection9(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 9: Overall Performance Targets of a strategy.
+    Updates Section 9: Overall Performance Targets of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_9")
-    new_content = _generate_section_stub("section_9", "Overall Performance Targets", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_9", new_content)
+    return _update_strategy_section(client_id, version_number, "section_9", content)
 
 
 @mcp.tool
-def editStrategySection10(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection10(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 10: Execution Timeline of a strategy.
+    Updates Section 10: Execution Timeline of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_10")
-    new_content = _generate_section_stub("section_10", "Execution Timeline", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_10", new_content)
+    return _update_strategy_section(client_id, version_number, "section_10", content)
 
 
 @mcp.tool
-def editStrategySection11(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection11(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 11: Budget & Investment of a strategy.
+    Updates Section 11: Budget & Investment of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_11")
-    new_content = _generate_section_stub("section_11", "Budget & Investment", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_11", new_content)
+    return _update_strategy_section(client_id, version_number, "section_11", content)
 
 
 @mcp.tool
-def editStrategySection12(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection12(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 12: Communication & Support of a strategy.
+    Updates Section 12: Communication & Support of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_12")
-    new_content = _generate_section_stub("section_12", "Communication & Support", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_12", new_content)
+    return _update_strategy_section(client_id, version_number, "section_12", content)
 
 
 @mcp.tool
-def editStrategySection13(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection13(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 13: Success Indicators of a strategy.
+    Updates Section 13: Success Indicators of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_13")
-    new_content = _generate_section_stub("section_13", "Success Indicators", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_13", new_content)
+    return _update_strategy_section(client_id, version_number, "section_13", content)
 
 
 @mcp.tool
-def editStrategySection14(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategySection14(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Section 14: Next Steps & Kickoff of a strategy.
+    Updates Section 14: Next Steps & Kickoff of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("section_14")
-    new_content = _generate_section_stub("section_14", "Next Steps & Kickoff", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "section_14", new_content)
+    return _update_strategy_section(client_id, version_number, "section_14", content)
 
 
 @mcp.tool
-def editStrategyAppendixA(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategyAppendixA(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Appendix A: Glossary of Terms of a strategy.
+    Updates Appendix A: Glossary of Terms of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("appendix_a")
-    new_content = _generate_section_stub("appendix_a", "Glossary of Terms", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "appendix_a", new_content)
+    return _update_strategy_section(client_id, version_number, "appendix_a", content)
 
 
 @mcp.tool
-def editStrategyAppendixB(client_id: int, version_number: int, instructions: Optional[str] = None) -> dict:
+def editStrategyAppendixB(client_id: int, version_number: int, content: str) -> dict:
     """
-    Edits Appendix B: Key Contacts of a strategy.
+    Updates Appendix B: Key Contacts of a strategy.
     
     Args:
         client_id (int): The client ID.
         version_number (int): The strategy version to edit.
-        instructions (str, optional): Instructions for how to regenerate this section.
+        content (str): The new content for this section (markdown format).
     
     Returns:
         dict: Status and the updated section content.
     """
-    strategy = _get_strategy(client_id, version_number)
-    if not strategy:
-        raise ValueError(f"Strategy not found for client_id={client_id}, version_number={version_number}")
-    
-    current_content = strategy.get("appendix_b")
-    new_content = _generate_section_stub("appendix_b", "Key Contacts", current_content, instructions)
-    
-    return _update_strategy_section(client_id, version_number, "appendix_b", new_content)
+    return _update_strategy_section(client_id, version_number, "appendix_b", content)
 
 
 if __name__ == "__main__":

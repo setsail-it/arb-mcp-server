@@ -141,6 +141,169 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
 
 
 @mcp.tool
+def getKeywordIdeas(
+    keywords: list[str],
+    location_code: int = 2840,
+    language_code: str = "en",
+    limit: int = 100,
+    include_serp_info: bool = True,
+    include_clickstream_data: bool = False,
+    filters: Optional[list] = None,
+    order_by: Optional[list] = None
+) -> dict:
+    """
+    Fetches keyword ideas based on seed keywords using DataForSEO Keyword Ideas API.
+    
+    This endpoint provides keyword ideas based on the specified seed keywords.
+    Results include search volume, competition, CPC, and related metrics.
+    
+    API Docs: https://docs.dataforseo.com/v3/dataforseo_labs/google/keyword_ideas/live/
+    
+    Args:
+        keywords (list[str]): Array of seed keywords (max 20 keywords).
+        location_code (int): Location code (default 2840 for United States).
+        language_code (str): Language code (default "en" for English).
+        limit (int): Maximum number of keyword ideas to return (default 100, max 1000).
+        include_serp_info (bool): Include SERP info in results (default True).
+        include_clickstream_data (bool): Include clickstream data (default False).
+        filters (list, optional): Array of filter conditions. Example:
+            [["keyword_info.search_volume", ">", 100], "and", ["keyword_info.competition_level", "=", "LOW"]]
+        order_by (list, optional): Array of order conditions. Example:
+            ["keyword_info.search_volume,desc"]
+    
+    Returns:
+        dict: Contains 'total_count', 'items_count', and 'items' array with keyword ideas.
+              Each item includes keyword, keyword_info (search_volume, competition, cpc, etc.),
+              keyword_properties (keyword_difficulty), and search_intent_info.
+    
+    Example filters:
+        - Filter by search volume > 100: [["keyword_info.search_volume", ">", 100]]
+        - Filter by low competition: [["keyword_info.competition_level", "=", "LOW"]]
+        - Combined: [["keyword_info.search_volume", ">", 100], "and", ["keyword_info.competition_level", "=", "LOW"]]
+    
+    Example order_by:
+        - Order by search volume descending: ["keyword_info.search_volume,desc"]
+        - Order by CPC ascending: ["keyword_info.cpc,asc"]
+    """
+    # DataForSEO API endpoint for Keyword Ideas
+    url = "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_ideas/live"
+    
+    # Retrieve DataForSEO Base64 authorization key from environment variable
+    api_key_base64 = os.getenv("DATAFORSEO_API_KEY")
+    
+    if not api_key_base64:
+        raise ValueError("DATAFORSEO_API_KEY environment variable is not set.")
+    
+    # Validate inputs
+    if not keywords or len(keywords) == 0:
+        raise ValueError("At least one seed keyword is required.")
+    
+    if len(keywords) > 20:
+        raise ValueError("Maximum 20 seed keywords allowed.")
+    
+    if limit > 1000:
+        limit = 1000  # Cap at API maximum
+    
+    # Prepare the payload
+    payload_item = {
+        "keywords": keywords,
+        "location_code": location_code,
+        "language_code": language_code,
+        "limit": limit,
+        "include_serp_info": include_serp_info,
+        "include_clickstream_data": include_clickstream_data,
+    }
+    
+    # Add optional filters if provided
+    if filters:
+        payload_item["filters"] = filters
+    
+    # Add optional order_by if provided
+    if order_by:
+        payload_item["order_by"] = order_by
+    
+    payload = [payload_item]
+    
+    # Make the POST request
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Basic {api_key_base64}"
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    
+    # Check for successful response
+    if response.status_code != 200:
+        raise Exception(f"DataForSEO API request failed with status code {response.status_code}: {response.text}")
+    
+    # Parse the response
+    data = response.json()
+    
+    try:
+        if 'tasks' not in data or not data['tasks']:
+            raise Exception("No tasks in DataForSEO API response")
+        
+        task = data['tasks'][0]
+        
+        if task.get('status_code') != 20000:
+            status_code = task.get('status_code')
+            status_message = task.get('status_message', 'Unknown error')
+            raise Exception(f"DataForSEO API error: {status_code} - {status_message}")
+        
+        if 'result' not in task or not task['result']:
+            return {
+                "total_count": 0,
+                "items_count": 0,
+                "items": [],
+                "seed_keywords": keywords
+            }
+        
+        result = task['result'][0]
+        
+        # Extract and format items
+        items = result.get('items', [])
+        formatted_items = []
+        
+        for item in items:
+            keyword_info = item.get('keyword_info', {})
+            keyword_properties = item.get('keyword_properties', {})
+            search_intent_info = item.get('search_intent_info', {})
+            serp_info = item.get('serp_info', {})
+            
+            formatted_item = {
+                "keyword": item.get('keyword'),
+                "search_volume": keyword_info.get('search_volume'),
+                "competition": keyword_info.get('competition'),
+                "competition_level": keyword_info.get('competition_level'),
+                "cpc": keyword_info.get('cpc'),
+                "low_top_of_page_bid": keyword_info.get('low_top_of_page_bid'),
+                "high_top_of_page_bid": keyword_info.get('high_top_of_page_bid'),
+                "keyword_difficulty": keyword_properties.get('keyword_difficulty'),
+                "main_intent": search_intent_info.get('main_intent'),
+                "monthly_searches": keyword_info.get('monthly_searches', [])[:6],  # Last 6 months
+            }
+            
+            # Include SERP info if available
+            if include_serp_info and serp_info:
+                formatted_item["serp_item_types"] = serp_info.get('serp_item_types', [])
+                formatted_item["se_results_count"] = serp_info.get('se_results_count')
+            
+            formatted_items.append(formatted_item)
+        
+        return {
+            "total_count": result.get('total_count', 0),
+            "items_count": result.get('items_count', 0),
+            "items": formatted_items,
+            "seed_keywords": keywords,
+            "location_code": location_code,
+            "language_code": language_code
+        }
+        
+    except (KeyError, IndexError, TypeError) as e:
+        raise Exception(f"Unexpected response structure from DataForSEO API: {e}. Response: {data}")
+
+
+@mcp.tool
 def readHTML(client_id: int, blog_id: int, version_number: int) -> dict:
     """
     Fetches a specific HTML version from the database.

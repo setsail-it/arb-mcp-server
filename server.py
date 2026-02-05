@@ -304,6 +304,82 @@ def getKeywordIdeas(
 
 
 @mcp.tool
+def addKeyword(client_id: int, keyword: str, search_volume: Optional[int] = None, keyword_difficulty: Optional[int] = None) -> dict:
+    """
+    Adds a keyword to a client's keyword list.
+    
+    This tool allows The Brute or other agents to add keywords incrementally
+    while generating keyword ideas, preventing timeouts.
+    
+    Args:
+        client_id (int): The client ID.
+        keyword (str): The keyword to add.
+        search_volume (int, optional): Search volume for the keyword.
+        keyword_difficulty (int, optional): Keyword difficulty score.
+    
+    Returns:
+        dict: A dictionary containing status, client_id, keyword, and the created keyword_id.
+    """
+    db = get_db_session()
+    try:
+        # Validate keyword
+        keyword = keyword.strip()
+        if not keyword:
+            raise ValueError("Keyword cannot be empty")
+        
+        # Check if keyword already exists for this client
+        existing = db.execute(
+            text("""
+                SELECT id FROM keyword_ideas
+                WHERE client_id = :client_id AND LOWER(keyword) = LOWER(:keyword)
+            """),
+            {"client_id": client_id, "keyword": keyword}
+        ).fetchone()
+        
+        if existing:
+            return {
+                "status": "already_exists",
+                "client_id": client_id,
+                "keyword": keyword,
+                "keyword_id": existing[0],
+                "message": f"Keyword '{keyword}' already exists for this client"
+            }
+        
+        # Insert new keyword
+        result = db.execute(
+            text("""
+                INSERT INTO keyword_ideas (client_id, keyword, source, search_volume, keyword_difficulty, created_at, updated_at)
+                VALUES (:client_id, :keyword, 'ai', :search_volume, :keyword_difficulty, NOW(), NOW())
+                RETURNING id
+            """),
+            {
+                "client_id": client_id,
+                "keyword": keyword,
+                "search_volume": search_volume,
+                "keyword_difficulty": keyword_difficulty
+            }
+        )
+        
+        keyword_id = result.fetchone()[0]
+        db.commit()
+        
+        return {
+            "status": "success",
+            "client_id": client_id,
+            "keyword": keyword,
+            "keyword_id": keyword_id,
+            "search_volume": search_volume,
+            "keyword_difficulty": keyword_difficulty,
+            "message": f"Successfully added keyword '{keyword}' to client {client_id}"
+        }
+    except Exception as e:
+        db.rollback()
+        raise Exception(f"Failed to add keyword: {str(e)}")
+    finally:
+        db.close()
+
+
+@mcp.tool
 def readHTML(client_id: int, blog_id: int, version_number: int) -> dict:
     """
     Fetches a specific HTML version from the database.

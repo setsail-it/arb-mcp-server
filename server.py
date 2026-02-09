@@ -367,10 +367,13 @@ def google_ads_keyword_planner(
         raise ValueError("Maximum 1000 keywords allowed per request.")
     
     # Prepare the payload - ad_traffic_by_keywords endpoint structure
+    # Note: According to DataForSEO docs, use a high bid value to level other factors
     payload_item = {
         "keywords": keywords,
         "location_code": location_code,
         "language_code": language_code,
+        "bid": 1.0,  # Required field - use high value for accurate forecasting
+        "match": "broad",  # Required field - keyword match type: exact, phrase, or broad
     }
     
     # Add optional date range if provided
@@ -417,95 +420,91 @@ def google_ads_keyword_planner(
                 "language_code": language_code
             }
         
+        # The ad_traffic_by_keywords endpoint returns aggregated data directly in result
+        # Structure: result contains data at top level, not in items array
         result = task['result'][0]
         
-        # Extract and format items
-        items = result.get('items', [])
-        formatted_items = []
-        
-        for item in items:
-            keyword_info = item.get('keyword_info', {})
-            ad_traffic = item.get('ad_traffic', {})
+        # Check if result has items array (individual keyword data) or aggregated data
+        if result.get('items') and len(result.get('items', [])) > 0:
+            # Individual keyword data structure
+            items = result.get('items', [])
+            formatted_items = []
             
-            # Extract CPC data from keyword_info
-            cpc = keyword_info.get('cpc')
-            cpc_min = keyword_info.get('cpc_min')
-            cpc_max = keyword_info.get('cpc_max')
-            
-            # If cpc_min/max not in keyword_info, try to get from ad_traffic
-            if cpc_min is None:
-                cpc_min = ad_traffic.get('cpc_min')
-            if cpc_max is None:
-                cpc_max = ad_traffic.get('cpc_max')
-            
-            formatted_item = {
-                "keyword": item.get('keyword'),
-                "search_volume": keyword_info.get('search_volume'),
-                "competition": keyword_info.get('competition'),
-                "competition_level": keyword_info.get('competition_level'),
-                "competition_index": keyword_info.get('competition_index'),
-                "cpc": cpc,  # Average CPC
-                "cpc_min": cpc_min,
-                "cpc_max": cpc_max,
-                "low_top_of_page_bid": keyword_info.get('low_top_of_page_bid'),
-                "high_top_of_page_bid": keyword_info.get('high_top_of_page_bid'),
-            }
-            
-            # Extract ad traffic metrics
-            if ad_traffic:
-                # Ad position (may be deprecated but still available)
-                formatted_item["ad_position"] = (
-                    ad_traffic.get('ad_position_average') or
-                    ad_traffic.get('ad_position') or
-                    None
-                )
+            for item in items:
+                keyword_info = item.get('keyword_info', {})
+                ad_traffic = item.get('ad_traffic', {})
                 
-                # Impressions
-                formatted_item["impressions"] = (
-                    ad_traffic.get('impressions') or
-                    ad_traffic.get('daily_impressions_average') or
-                    None
-                )
+                formatted_item = {
+                    "keyword": item.get('keyword'),
+                    "search_volume": keyword_info.get('search_volume'),
+                    "competition": keyword_info.get('competition'),
+                    "competition_level": keyword_info.get('competition_level'),
+                    "competition_index": keyword_info.get('competition_index'),
+                    "cpc": keyword_info.get('cpc'),
+                    "cpc_min": keyword_info.get('cpc_min') or ad_traffic.get('cpc_min'),
+                    "cpc_max": keyword_info.get('cpc_max') or ad_traffic.get('cpc_max'),
+                    "low_top_of_page_bid": keyword_info.get('low_top_of_page_bid'),
+                    "high_top_of_page_bid": keyword_info.get('high_top_of_page_bid'),
+                    "ad_position": ad_traffic.get('ad_position_average') or ad_traffic.get('ad_position'),
+                    "impressions": ad_traffic.get('impressions') or ad_traffic.get('daily_impressions_average'),
+                    "clicks": ad_traffic.get('clicks') or ad_traffic.get('daily_clicks_average'),
+                }
                 
-                # Clicks
-                formatted_item["clicks"] = (
-                    ad_traffic.get('clicks') or
-                    ad_traffic.get('daily_clicks_average') or
-                    None
-                )
-                
-                # Cost - check for cost_micros in various locations
-                cost_micros = (
-                    ad_traffic.get('cost_micros') or
-                    ad_traffic.get('daily_cost_average') or
-                    None
-                )
-                
+                cost_micros = ad_traffic.get('cost_micros') or ad_traffic.get('daily_cost_average')
                 if cost_micros:
                     formatted_item["cost_micros"] = cost_micros
                     formatted_item["cost_usd"] = cost_micros / 1_000_000 if isinstance(cost_micros, (int, float)) else None
                 else:
                     formatted_item["cost_micros"] = None
                     formatted_item["cost_usd"] = None
-            else:
-                # No ad_traffic data available
-                formatted_item["ad_position"] = None
-                formatted_item["impressions"] = None
-                formatted_item["clicks"] = None
-                formatted_item["cost_micros"] = None
-                formatted_item["cost_usd"] = None
+                
+                formatted_items.append(formatted_item)
+        else:
+            # Aggregated data structure (all keywords combined)
+            # Create one item per keyword with aggregated metrics
+            formatted_items = []
             
-            formatted_items.append(formatted_item)
+            for keyword in keywords:
+                formatted_item = {
+                    "keyword": keyword,
+                    "search_volume": None,  # Not available in aggregated response
+                    "competition": None,
+                    "competition_level": None,
+                    "competition_index": None,
+                    "cpc": result.get('average_cpc'),
+                    "cpc_min": None,  # Not available in aggregated response
+                    "cpc_max": None,  # Not available in aggregated response
+                    "low_top_of_page_bid": None,
+                    "high_top_of_page_bid": None,
+                    "ad_position": None,  # Not available in aggregated response
+                    "impressions": result.get('impressions'),
+                    "clicks": result.get('clicks'),
+                    "ctr": result.get('ctr'),  # Click-through rate
+                }
+                
+                # Cost is in dollars, convert to micros for consistency
+                cost_usd = result.get('cost')
+                if cost_usd:
+                    formatted_item["cost_usd"] = cost_usd
+                    formatted_item["cost_micros"] = int(cost_usd * 1_000_000) if isinstance(cost_usd, (int, float)) else None
+                else:
+                    formatted_item["cost_usd"] = None
+                    formatted_item["cost_micros"] = None
+                
+                formatted_items.append(formatted_item)
         
         return {
-            "total_count": result.get('total_count', len(formatted_items)),
-            "items_count": result.get('items_count', len(formatted_items)),
+            "total_count": len(formatted_items),
+            "items_count": len(formatted_items),
             "items": formatted_items,
             "keywords": keywords,
             "location_code": location_code,
             "language_code": language_code,
             "date_from": date_from,
-            "date_to": date_to
+            "date_to": date_to,
+            "date_interval": result.get('date_interval'),
+            "match": result.get('match'),
+            "bid": result.get('bid'),
         }
         
     except (KeyError, IndexError, TypeError) as e:

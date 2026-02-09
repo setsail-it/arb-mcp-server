@@ -350,9 +350,8 @@ def google_ads_keyword_planner(
             language_code="en"
         )
     """
-    # DataForSEO API endpoint for Google Ads Search Volume (includes CPC and competition data)
-    # The ad_traffic_by_keywords endpoint requires additional parameters, so we use search_volume
-    url = "https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live"
+    # DataForSEO API endpoint for Google Ads Ad Traffic By Keywords
+    url = "https://api.dataforseo.com/v3/keywords_data/google_ads/ad_traffic_by_keywords/live"
     
     # Retrieve DataForSEO Base64 authorization key from environment variable
     api_key_base64 = os.getenv("DATAFORSEO_API_KEY")
@@ -367,7 +366,7 @@ def google_ads_keyword_planner(
     if len(keywords) > 1000:
         raise ValueError("Maximum 1000 keywords allowed per request.")
     
-    # Prepare the payload
+    # Prepare the payload - ad_traffic_by_keywords endpoint structure
     payload_item = {
         "keywords": keywords,
         "location_code": location_code,
@@ -418,40 +417,89 @@ def google_ads_keyword_planner(
                 "language_code": language_code
             }
         
-        # The search_volume endpoint returns data directly in result array (one item per keyword)
-        # Each result item contains the keyword data directly (not nested in 'items')
-        results = task['result']
+        result = task['result'][0]
+        
+        # Extract and format items
+        items = result.get('items', [])
         formatted_items = []
         
-        for result_item in results:
-            # Data is directly in result_item, not nested
+        for item in items:
+            keyword_info = item.get('keyword_info', {})
+            ad_traffic = item.get('ad_traffic', {})
+            
+            # Extract CPC data from keyword_info
+            cpc = keyword_info.get('cpc')
+            cpc_min = keyword_info.get('cpc_min')
+            cpc_max = keyword_info.get('cpc_max')
+            
+            # If cpc_min/max not in keyword_info, try to get from ad_traffic
+            if cpc_min is None:
+                cpc_min = ad_traffic.get('cpc_min')
+            if cpc_max is None:
+                cpc_max = ad_traffic.get('cpc_max')
+            
             formatted_item = {
-                "keyword": result_item.get('keyword'),
-                "search_volume": result_item.get('search_volume'),
-                "competition": result_item.get('competition'),
-                "competition_level": result_item.get('competition'),
-                "competition_index": result_item.get('competition_index'),
-                "cpc": result_item.get('cpc'),  # Average CPC
-                "cpc_min": result_item.get('cpc_min'),  # May not be available in this endpoint
-                "cpc_max": result_item.get('cpc_max'),  # May not be available in this endpoint
-                "low_top_of_page_bid": result_item.get('low_top_of_page_bid'),
-                "high_top_of_page_bid": result_item.get('high_top_of_page_bid'),
-                "monthly_searches": result_item.get('monthly_searches', [])[:6],  # Last 6 months
+                "keyword": item.get('keyword'),
+                "search_volume": keyword_info.get('search_volume'),
+                "competition": keyword_info.get('competition'),
+                "competition_level": keyword_info.get('competition_level'),
+                "competition_index": keyword_info.get('competition_index'),
+                "cpc": cpc,  # Average CPC
+                "cpc_min": cpc_min,
+                "cpc_max": cpc_max,
+                "low_top_of_page_bid": keyword_info.get('low_top_of_page_bid'),
+                "high_top_of_page_bid": keyword_info.get('high_top_of_page_bid'),
             }
             
-            # Note: ad_position, impressions, clicks, and cost are not available in search_volume endpoint
-            # Those require the ad_traffic_by_keywords endpoint which has different requirements
-            formatted_item["ad_position"] = None
-            formatted_item["impressions"] = None
-            formatted_item["clicks"] = None
-            formatted_item["cost_micros"] = None
-            formatted_item["cost_usd"] = None
+            # Extract ad traffic metrics
+            if ad_traffic:
+                # Ad position (may be deprecated but still available)
+                formatted_item["ad_position"] = (
+                    ad_traffic.get('ad_position_average') or
+                    ad_traffic.get('ad_position') or
+                    None
+                )
+                
+                # Impressions
+                formatted_item["impressions"] = (
+                    ad_traffic.get('impressions') or
+                    ad_traffic.get('daily_impressions_average') or
+                    None
+                )
+                
+                # Clicks
+                formatted_item["clicks"] = (
+                    ad_traffic.get('clicks') or
+                    ad_traffic.get('daily_clicks_average') or
+                    None
+                )
+                
+                # Cost - check for cost_micros in various locations
+                cost_micros = (
+                    ad_traffic.get('cost_micros') or
+                    ad_traffic.get('daily_cost_average') or
+                    None
+                )
+                
+                if cost_micros:
+                    formatted_item["cost_micros"] = cost_micros
+                    formatted_item["cost_usd"] = cost_micros / 1_000_000 if isinstance(cost_micros, (int, float)) else None
+                else:
+                    formatted_item["cost_micros"] = None
+                    formatted_item["cost_usd"] = None
+            else:
+                # No ad_traffic data available
+                formatted_item["ad_position"] = None
+                formatted_item["impressions"] = None
+                formatted_item["clicks"] = None
+                formatted_item["cost_micros"] = None
+                formatted_item["cost_usd"] = None
             
             formatted_items.append(formatted_item)
         
         return {
-            "total_count": len(formatted_items),
-            "items_count": len(formatted_items),
+            "total_count": result.get('total_count', len(formatted_items)),
+            "items_count": result.get('items_count', len(formatted_items)),
             "items": formatted_items,
             "keywords": keywords,
             "location_code": location_code,

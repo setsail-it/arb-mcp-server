@@ -350,8 +350,9 @@ def google_ads_keyword_planner(
             language_code="en"
         )
     """
-    # DataForSEO API endpoint for Google Ads Ad Traffic By Keywords
-    url = "https://api.dataforseo.com/v3/keywords_data/google_ads/ad_traffic_by_keywords/live"
+    # DataForSEO API endpoint for Google Ads Search Volume (includes CPC and competition data)
+    # The ad_traffic_by_keywords endpoint requires additional parameters, so we use search_volume
+    url = "https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live"
     
     # Retrieve DataForSEO Base64 authorization key from environment variable
     api_key_base64 = os.getenv("DATAFORSEO_API_KEY")
@@ -417,83 +418,40 @@ def google_ads_keyword_planner(
                 "language_code": language_code
             }
         
-        result = task['result'][0]
-        
-        # Extract and format items
-        items = result.get('items', [])
+        # The search_volume endpoint returns data directly in result array (one item per keyword)
+        # Each result item contains the keyword data directly (not nested in 'items')
+        results = task['result']
         formatted_items = []
         
-        for item in items:
-            keyword_info = item.get('keyword_info', {})
-            keyword_properties = item.get('keyword_properties', {})
-            serp_info = item.get('serp_info', {})
-            
-            # Extract ad traffic data - this endpoint returns ad traffic metrics directly
-            # The structure may vary, so we check multiple possible locations
-            ad_traffic = item.get('ad_traffic', {})
-            
+        for result_item in results:
+            # Data is directly in result_item, not nested
             formatted_item = {
-                "keyword": item.get('keyword'),
-                "search_volume": keyword_info.get('search_volume'),
-                "competition": keyword_info.get('competition'),
-                "competition_level": keyword_info.get('competition_level'),
-                "competition_index": keyword_info.get('competition_index'),
-                "cpc": keyword_info.get('cpc'),  # Average CPC
-                "cpc_min": keyword_info.get('cpc_min'),
-                "cpc_max": keyword_info.get('cpc_max'),
-                "low_top_of_page_bid": keyword_info.get('low_top_of_page_bid'),
-                "high_top_of_page_bid": keyword_info.get('high_top_of_page_bid'),
-                "keyword_difficulty": keyword_properties.get('keyword_difficulty'),
+                "keyword": result_item.get('keyword'),
+                "search_volume": result_item.get('search_volume'),
+                "competition": result_item.get('competition'),
+                "competition_level": result_item.get('competition'),
+                "competition_index": result_item.get('competition_index'),
+                "cpc": result_item.get('cpc'),  # Average CPC
+                "cpc_min": result_item.get('cpc_min'),  # May not be available in this endpoint
+                "cpc_max": result_item.get('cpc_max'),  # May not be available in this endpoint
+                "low_top_of_page_bid": result_item.get('low_top_of_page_bid'),
+                "high_top_of_page_bid": result_item.get('high_top_of_page_bid'),
+                "monthly_searches": result_item.get('monthly_searches', [])[:6],  # Last 6 months
             }
             
-            # Add ad traffic metrics - check both ad_traffic object and direct item fields
-            # Ad position (may be deprecated but still available)
-            ad_position = (
-                ad_traffic.get('ad_position_average') or 
-                item.get('ad_position_average') or
-                ad_traffic.get('ad_position')
-            )
-            formatted_item["ad_position"] = ad_position
-            
-            # Impressions
-            impressions = (
-                ad_traffic.get('impressions') or
-                item.get('impressions') or
-                ad_traffic.get('daily_impressions_average')
-            )
-            formatted_item["impressions"] = impressions
-            
-            # Clicks
-            clicks = (
-                ad_traffic.get('clicks') or
-                item.get('clicks') or
-                ad_traffic.get('daily_clicks_average')
-            )
-            formatted_item["clicks"] = clicks
-            
-            # Cost - check for cost_micros in various locations
-            cost_micros = (
-                ad_traffic.get('cost_micros') or
-                item.get('cost_micros') or
-                ad_traffic.get('daily_cost_average')
-            )
-            if cost_micros:
-                formatted_item["cost_micros"] = cost_micros
-                formatted_item["cost_usd"] = cost_micros / 1_000_000 if isinstance(cost_micros, (int, float)) else None
-            else:
-                formatted_item["cost_micros"] = None
-                formatted_item["cost_usd"] = None
-            
-            # Add SERP info if available
-            if serp_info:
-                formatted_item["se_results_count"] = serp_info.get('se_results_count')
-                formatted_item["serp_item_types"] = serp_info.get('serp_item_types', [])
+            # Note: ad_position, impressions, clicks, and cost are not available in search_volume endpoint
+            # Those require the ad_traffic_by_keywords endpoint which has different requirements
+            formatted_item["ad_position"] = None
+            formatted_item["impressions"] = None
+            formatted_item["clicks"] = None
+            formatted_item["cost_micros"] = None
+            formatted_item["cost_usd"] = None
             
             formatted_items.append(formatted_item)
         
         return {
-            "total_count": result.get('total_count', 0),
-            "items_count": result.get('items_count', 0),
+            "total_count": len(formatted_items),
+            "items_count": len(formatted_items),
             "items": formatted_items,
             "keywords": keywords,
             "location_code": location_code,

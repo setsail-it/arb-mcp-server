@@ -304,6 +304,209 @@ def getKeywordIdeas(
 
 
 @mcp.tool
+def google_ads_keyword_planner(
+    keywords: list[str],
+    location_code: int = 2840,
+    language_code: str = "en",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None
+) -> dict:
+    """
+    Fetches Google Ads keyword planner data including CPC, impressions, clicks, cost, and position data.
+    
+    This tool uses the DataForSEO Google Ads Ad Traffic By Keywords API to get comprehensive
+    keyword metrics including CPC ranges, ad positions, impressions, clicks, and cost data.
+    
+    API Docs: https://docs.dataforseo.com/v3/keywords_data/google_ads/ad_traffic_by_keywords/
+    
+    Args:
+        keywords (list[str]): Array of keywords to analyze (max 1000 keywords per request).
+        location_code (int): Location code (default 2840 for United States).
+        language_code (str): Language code (default "en" for English).
+        date_from (str, optional): Start date in YYYY-MM-DD format. If not provided, uses default period.
+        date_to (str, optional): End date in YYYY-MM-DD format. If not provided, uses default period.
+    
+    Returns:
+        dict: Contains 'total_count', 'items_count', and 'items' array with keyword data.
+              Each item includes:
+              - keyword: The keyword text
+              - search_volume: Monthly search volume
+              - cpc: Average CPC (cost per click)
+              - cpc_min: Minimum CPC
+              - cpc_max: Maximum CPC
+              - competition: Competition level (LOW, MEDIUM, HIGH)
+              - competition_index: Competition index (0-1)
+              - low_top_of_page_bid: Low top of page bid estimate
+              - high_top_of_page_bid: High top of page bid estimate
+              - ad_position: Average ad position (if available)
+              - impressions: Impressions for the period
+              - clicks: Clicks for the period
+              - cost: Cost for the period (in micros, divide by 1,000,000 for dollars)
+    
+    Example:
+        google_ads_keyword_planner(
+            keywords=["digital marketing", "seo services"],
+            location_code=2840,
+            language_code="en"
+        )
+    """
+    # DataForSEO API endpoint for Google Ads Ad Traffic By Keywords
+    url = "https://api.dataforseo.com/v3/keywords_data/google_ads/ad_traffic_by_keywords/live"
+    
+    # Retrieve DataForSEO Base64 authorization key from environment variable
+    api_key_base64 = os.getenv("DATAFORSEO_API_KEY")
+    
+    if not api_key_base64:
+        raise ValueError("DATAFORSEO_API_KEY environment variable is not set.")
+    
+    # Validate inputs
+    if not keywords or len(keywords) == 0:
+        raise ValueError("At least one keyword is required.")
+    
+    if len(keywords) > 1000:
+        raise ValueError("Maximum 1000 keywords allowed per request.")
+    
+    # Prepare the payload
+    payload_item = {
+        "keywords": keywords,
+        "location_code": location_code,
+        "language_code": language_code,
+    }
+    
+    # Add optional date range if provided
+    if date_from:
+        payload_item["date_from"] = date_from
+    if date_to:
+        payload_item["date_to"] = date_to
+    
+    payload = [payload_item]
+    
+    # Make the POST request
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Basic {api_key_base64}"
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    
+    # Check for successful response
+    if response.status_code != 200:
+        raise Exception(f"DataForSEO API request failed with status code {response.status_code}: {response.text}")
+    
+    # Parse the response
+    data = response.json()
+    
+    try:
+        if 'tasks' not in data or not data['tasks']:
+            raise Exception("No tasks in DataForSEO API response")
+        
+        task = data['tasks'][0]
+        
+        if task.get('status_code') != 20000:
+            status_code = task.get('status_code')
+            status_message = task.get('status_message', 'Unknown error')
+            raise Exception(f"DataForSEO API error: {status_code} - {status_message}")
+        
+        if 'result' not in task or not task['result']:
+            return {
+                "total_count": 0,
+                "items_count": 0,
+                "items": [],
+                "keywords": keywords,
+                "location_code": location_code,
+                "language_code": language_code
+            }
+        
+        result = task['result'][0]
+        
+        # Extract and format items
+        items = result.get('items', [])
+        formatted_items = []
+        
+        for item in items:
+            keyword_info = item.get('keyword_info', {})
+            keyword_properties = item.get('keyword_properties', {})
+            serp_info = item.get('serp_info', {})
+            
+            # Extract ad traffic data - this endpoint returns ad traffic metrics directly
+            # The structure may vary, so we check multiple possible locations
+            ad_traffic = item.get('ad_traffic', {})
+            
+            formatted_item = {
+                "keyword": item.get('keyword'),
+                "search_volume": keyword_info.get('search_volume'),
+                "competition": keyword_info.get('competition'),
+                "competition_level": keyword_info.get('competition_level'),
+                "competition_index": keyword_info.get('competition_index'),
+                "cpc": keyword_info.get('cpc'),  # Average CPC
+                "cpc_min": keyword_info.get('cpc_min'),
+                "cpc_max": keyword_info.get('cpc_max'),
+                "low_top_of_page_bid": keyword_info.get('low_top_of_page_bid'),
+                "high_top_of_page_bid": keyword_info.get('high_top_of_page_bid'),
+                "keyword_difficulty": keyword_properties.get('keyword_difficulty'),
+            }
+            
+            # Add ad traffic metrics - check both ad_traffic object and direct item fields
+            # Ad position (may be deprecated but still available)
+            ad_position = (
+                ad_traffic.get('ad_position_average') or 
+                item.get('ad_position_average') or
+                ad_traffic.get('ad_position')
+            )
+            formatted_item["ad_position"] = ad_position
+            
+            # Impressions
+            impressions = (
+                ad_traffic.get('impressions') or
+                item.get('impressions') or
+                ad_traffic.get('daily_impressions_average')
+            )
+            formatted_item["impressions"] = impressions
+            
+            # Clicks
+            clicks = (
+                ad_traffic.get('clicks') or
+                item.get('clicks') or
+                ad_traffic.get('daily_clicks_average')
+            )
+            formatted_item["clicks"] = clicks
+            
+            # Cost - check for cost_micros in various locations
+            cost_micros = (
+                ad_traffic.get('cost_micros') or
+                item.get('cost_micros') or
+                ad_traffic.get('daily_cost_average')
+            )
+            if cost_micros:
+                formatted_item["cost_micros"] = cost_micros
+                formatted_item["cost_usd"] = cost_micros / 1_000_000 if isinstance(cost_micros, (int, float)) else None
+            else:
+                formatted_item["cost_micros"] = None
+                formatted_item["cost_usd"] = None
+            
+            # Add SERP info if available
+            if serp_info:
+                formatted_item["se_results_count"] = serp_info.get('se_results_count')
+                formatted_item["serp_item_types"] = serp_info.get('serp_item_types', [])
+            
+            formatted_items.append(formatted_item)
+        
+        return {
+            "total_count": result.get('total_count', 0),
+            "items_count": result.get('items_count', 0),
+            "items": formatted_items,
+            "keywords": keywords,
+            "location_code": location_code,
+            "language_code": language_code,
+            "date_from": date_from,
+            "date_to": date_to
+        }
+        
+    except (KeyError, IndexError, TypeError) as e:
+        raise Exception(f"Unexpected response structure from DataForSEO API: {e}. Response: {data}")
+
+
+@mcp.tool
 def addKeyword(client_id: int, keyword: str, search_volume: Optional[int] = None, keyword_difficulty: Optional[int] = None) -> dict:
     """
     Adds a keyword to a client's keyword list.

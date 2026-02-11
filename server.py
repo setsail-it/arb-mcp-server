@@ -113,7 +113,14 @@ def get_search_volume(keyword: str, location_code: int = 2840, language_code: st
         
         result = task['result'][0]
         if 'items' not in result or not result['items']:
-            raise Exception("DataForSEO API result has no items")
+            # Return a graceful response when no data is available
+            return {
+                "keyword": keyword,
+                "search_volume": None,
+                "keyword_difficulty": None,
+                "main_intent": None,
+                "error": "No data available for this keyword"
+            }
         
         item = result['items'][0]
         

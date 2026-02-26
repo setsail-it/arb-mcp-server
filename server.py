@@ -2670,47 +2670,6 @@ async def keyword_opportunities_route(request):
     return JSONResponse(result)
 
 
-# REST endpoint for arb-v1 backend: fetch sitemap XML (long-running, poll every 15s)
-@mcp.custom_route("/sitemap-fetch", methods=["POST"])
-async def sitemap_fetch_route(request):
-    """POST with JSON { \"domain\": \"setsail.ca\" }; returns sitemap XML or error."""
-    import asyncio
-    from starlette.responses import Response, JSONResponse
-
-    try:
-        body = await request.json()
-    except Exception as e:
-        return JSONResponse({"error": f"Invalid JSON: {e}"}, status_code=400)
-    domain = body.get("domain") or body.get("target") or ""
-    domain = (domain or "").strip()
-    if not domain:
-        return JSONResponse({"error": "Missing domain or target"}, status_code=400)
-    site_url = domain if domain.startswith("http") else f"https://{domain}"
-    try:
-        result = await asyncio.to_thread(
-            fetch_site_pages_dataforseo_impl,
-            site_url,
-            max_wait_seconds=1800,
-            poll_interval_seconds=15,
-        )
-    except Exception as e:
-        logger.exception("[Sitemap] sitemap-fetch failed")
-        return JSONResponse({"error": str(e)}, status_code=500)
-    err = result.get("error")
-    if err:
-        return JSONResponse({"error": err}, status_code=502)
-    urls = result.get("urls") or []
-    xml_parts = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-    ]
-    for u in urls:
-        xml_parts.append(f"  <url><loc>{u}</loc></url>")
-    xml_parts.append("</urlset>")
-    xml_str = "\n".join(xml_parts)
-    return Response(content=xml_str.encode("utf-8"), media_type="application/xml")
-
-
 if __name__ == "__main__":
     # Run the MCP server
     mcp.run(transport="streamable-http", host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))

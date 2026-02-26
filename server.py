@@ -747,6 +747,103 @@ def google_ads_keyword_planner(
         raise Exception(f"Unexpected response structure from DataForSEO API: {e}. Response: {data}")
 
 
+def _parse_keywords_data_result(data: dict) -> list[dict]:
+    """Extract list of { keyword, search_volume?, cpc?, competition? } from DataForSEO keywords_data task result."""
+    tasks = data.get("tasks") or []
+    if not tasks:
+        raise ValueError("DataForSEO API returned no tasks")
+    task = tasks[0]
+    if task.get("status_code") != 20000:
+        raise ValueError(
+            f"DataForSEO API error: {task.get('status_code')} - {task.get('status_message', 'Unknown')}"
+        )
+    result_list = task.get("result") or []
+    out = []
+    for item in result_list:
+        out.append({
+            "keyword": item.get("keyword") or "",
+            "search_volume": item.get("search_volume"),
+            "cpc": item.get("cpc"),
+            "competition": item.get("competition"),
+        })
+    return out
+
+
+@mcp.tool
+def keywords_for_site(
+    url: str,
+    location_code: int,
+    language_code: str = "en",
+    limit: Optional[int] = 50,
+) -> dict:
+    """
+    Get keywords relevant to a site or page using DataForSEO Google Ads Keywords For Site API.
+    Returns seed keywords with search_volume, cpc, competition; raw response included for debugging.
+
+    Args:
+        url: Target URL or domain (e.g. https://example.com or example.com).
+        location_code: DataForSEO location code (e.g. 2840 US, 2124 Canada).
+        language_code: Language code (default en).
+        limit: Max number of keywords to return (default 50). API returns up to 2000; we slice to this.
+
+    Returns:
+        { seeds: Array<{ keyword, search_volume?, cpc?, competition? }>, raw: full API response }
+    """
+    if not url or not url.strip():
+        return {"seeds": [], "raw": None}
+    target = url.strip()
+    payload = [{
+        "target": target,
+        "location_code": location_code,
+        "language_code": language_code,
+    }]
+    data = _dataforseo_keywords_post("keywords_for_site/live", payload)
+    try:
+        items = _parse_keywords_data_result(data)
+    except ValueError:
+        return {"seeds": [], "raw": data}
+    limit = limit if limit is not None else 50
+    seeds = items[: max(1, limit)]
+    return {"seeds": seeds, "raw": data}
+
+
+@mcp.tool
+def keywords_for_keywords(
+    keywords: list[str],
+    location_code: int,
+    language_code: str = "en",
+    limit: Optional[int] = 200,
+) -> dict:
+    """
+    Get keyword suggestions for given seed keywords using DataForSEO Google Ads Keywords For Keywords API.
+    Returns suggestions with search_volume, cpc, competition; raw response included for debugging.
+
+    Args:
+        keywords: Seed keywords (max 20 per API).
+        location_code: DataForSEO location code (e.g. 2840 US, 2124 Canada).
+        language_code: Language code (default en).
+        limit: Max number of suggestions to return (default 200). API returns up to 20000; we slice to this.
+
+    Returns:
+        { suggestions: Array<{ keyword, search_volume?, cpc?, competition? }>, raw: full API response }
+    """
+    if not keywords:
+        return {"suggestions": [], "raw": None}
+    payload = [{
+        "keywords": keywords[:20],
+        "location_code": location_code,
+        "language_code": language_code,
+    }]
+    data = _dataforseo_keywords_post("keywords_for_keywords/live", payload)
+    try:
+        items = _parse_keywords_data_result(data)
+    except ValueError:
+        return {"suggestions": [], "raw": data}
+    limit_val = limit if limit is not None else 200
+    suggestions = items[: max(1, limit_val)]
+    return {"suggestions": suggestions, "raw": data}
+
+
 @mcp.tool
 def addKeyword(client_id: int, keyword: str, search_volume: Optional[int] = None, keyword_difficulty: Optional[int] = None) -> dict:
     """
@@ -2362,6 +2459,22 @@ def editStrategyAppendixB(client_id: int, version_number: int, content: str) -> 
         dict: Status and the updated section content.
     """
     return _update_strategy_section(client_id, version_number, "appendix_b", content)
+
+
+# --- DataForSEO Keywords Data (Google Ads) ---
+KEYWORDS_DATA_BASE = "https://api.dataforseo.com/v3/keywords_data/google_ads"
+
+
+def _dataforseo_keywords_post(endpoint: str, payload: list) -> dict:
+    """POST to DataForSEO keywords_data/google_ads endpoint. Returns full JSON."""
+    auth = _dataforseo_basic_auth()
+    if not auth:
+        raise ValueError("DATAFORSEO_USERNAME + DATAFORSEO_API_SECRET (or API_KEY) not set.")
+    url = f"{KEYWORDS_DATA_BASE}/{endpoint}"
+    headers = {"Content-Type": "application/json", "Authorization": f"Basic {auth}"}
+    r = requests.post(url, headers=headers, json=payload, timeout=120)
+    r.raise_for_status()
+    return r.json()
 
 
 # --- DataForSEO Labs: Keyword Opportunities (competitors + gap keywords) ---

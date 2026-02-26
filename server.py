@@ -996,6 +996,75 @@ def update_kw_sitemap(client_id: int) -> dict:
 
 
 @mcp.tool
+def get_webflow_pages(site_id: Optional[str] = None, client_id: Optional[int] = None) -> dict:
+    """
+    Returns the stored Webflow pages for a site. Pages are stored when a user runs
+    "Get all pages" in the Page Updater (AI panel). Provide either site_id (Webflow site ID)
+    or client_id (looked up from the clients table via client.site_id).
+
+    Args:
+        site_id (str, optional): Webflow site ID.
+        client_id (int, optional): Client ID; site_id is looked up from clients.site_id.
+
+    Returns:
+        dict: site_id (str), pages (list of {page_id, title, slug, published_path, collection_id, type}).
+              On error, error (str) and optionally message.
+    """
+    if not site_id and client_id is None:
+        return {"site_id": "", "pages": [], "error": "Provide either site_id or client_id."}
+    resolved_site_id = site_id
+    if not resolved_site_id and client_id is not None:
+        db = get_db_session()
+        try:
+            row = db.execute(
+                text("SELECT site_id FROM clients WHERE id = :client_id"),
+                {"client_id": client_id},
+            ).fetchone()
+            if not row or not row[0]:
+                return {
+                    "site_id": "",
+                    "pages": [],
+                    "error": f"No site_id found for client_id={client_id}. Confirm a site in Page Updater first.",
+                }
+            resolved_site_id = row[0]
+        finally:
+            db.close()
+    if not resolved_site_id:
+        return {"site_id": "", "pages": [], "error": "Could not resolve site_id."}
+    db = get_db_session()
+    try:
+        rows = db.execute(
+            text("""
+                SELECT page_id, title, slug, published_path, collection_id, type
+                FROM webflow_pages WHERE site_id = :site_id ORDER BY id
+            """),
+            {"site_id": resolved_site_id},
+        ).fetchall()
+        pages = [
+            {
+                "page_id": r[0],
+                "title": r[1],
+                "slug": r[2],
+                "published_path": r[3],
+                "collection_id": r[4],
+                "type": r[5],
+            }
+            for r in rows
+        ]
+        return {"site_id": resolved_site_id, "pages": pages}
+    except Exception as e:
+        logger.exception("get_webflow_pages failed")
+        return {
+            "site_id": resolved_site_id or "",
+            "pages": [],
+            "error": str(e),
+            "message": "Ensure webflow_pages table exists (run arb-v1 migrations).",
+        }
+    finally:
+        db.close()
+
+
+@mcp.tool
 def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
     """
     Generates an image using Google Gemini's image generation API, decodes base64 if needed,

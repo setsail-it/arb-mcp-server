@@ -568,6 +568,11 @@ def _parse_keywords_data_result(data: dict) -> list[dict]:
     return out
 
 
+# Hard caps on MCP return size to avoid flooding model context (caller limit is capped by these)
+MAX_KEYWORDS_FOR_SITE_RETURN = 50
+MAX_KEYWORDS_FOR_KEYWORDS_RETURN = 100
+
+
 @mcp.tool
 def keywords_for_site(
     url: str,
@@ -583,13 +588,13 @@ def keywords_for_site(
         url: Target URL or domain (e.g. https://example.com or example.com).
         location_code: DataForSEO location code (e.g. 2840 US, 2124 Canada).
         language_code: Language code (default en).
-        limit: Max number of keywords to return (default 50). API returns up to 2000; we slice to this.
+        limit: Max number of keywords to return (default 50). Capped at %s to avoid context overflow.
 
     Returns:
-        { seeds: Array<{ keyword, search_volume?, cpc?, competition? }>, raw: full API response }
-    """
+        { seeds: Array<{ keyword, search_volume?, cpc?, competition? }>, total_available: N }
+    """ % MAX_KEYWORDS_FOR_SITE_RETURN
     if not url or not url.strip():
-        return {"seeds": [], "raw": None}
+        return {"seeds": [], "total_available": 0}
     target = url.strip()
     payload = [{
         "target": target,
@@ -600,10 +605,10 @@ def keywords_for_site(
     try:
         items = _parse_keywords_data_result(data)
     except ValueError:
-        return {"seeds": [], "raw": data}
-    limit = limit if limit is not None else 50
-    seeds = items[: max(1, limit)]
-    return {"seeds": seeds, "raw": data}
+        return {"seeds": [], "total_available": 0}
+    cap = min(max(1, limit if limit is not None else 50), MAX_KEYWORDS_FOR_SITE_RETURN)
+    seeds = items[:cap]
+    return {"seeds": seeds, "total_available": len(items)}
 
 
 @mcp.tool
@@ -621,13 +626,13 @@ def keywords_for_keywords(
         keywords: Seed keywords (max 20 per API).
         location_code: DataForSEO location code (e.g. 2840 US, 2124 Canada).
         language_code: Language code (default en).
-        limit: Max number of suggestions to return (default 200). API returns up to 20000; we slice to this.
+        limit: Max number of suggestions to return (default 200). Capped at %s to avoid context overflow.
 
     Returns:
-        { suggestions: Array<{ keyword, search_volume?, cpc?, competition? }>, raw: full API response }
-    """
+        { suggestions: Array<{ keyword, search_volume?, cpc?, competition? }>, total_available: N }
+    """ % MAX_KEYWORDS_FOR_KEYWORDS_RETURN
     if not keywords:
-        return {"suggestions": [], "raw": None}
+        return {"suggestions": [], "total_available": 0}
     payload = [{
         "keywords": keywords[:20],
         "location_code": location_code,
@@ -637,10 +642,11 @@ def keywords_for_keywords(
     try:
         items = _parse_keywords_data_result(data)
     except ValueError:
-        return {"suggestions": [], "raw": data}
+        return {"suggestions": [], "total_available": 0}
     limit_val = limit if limit is not None else 200
-    suggestions = items[: max(1, limit_val)]
-    return {"suggestions": suggestions, "raw": data}
+    cap = min(max(1, limit_val), MAX_KEYWORDS_FOR_KEYWORDS_RETURN)
+    suggestions = items[:cap]
+    return {"suggestions": suggestions, "total_available": len(items)}
 
 
 @mcp.tool
@@ -888,6 +894,49 @@ def getClientWritingRules(client_id: int) -> dict:
             "questionnaire": result[2],
             "author_tone": result[3],
             "author_rules": result[4]
+        }
+    finally:
+        db.close()
+
+
+@mcp.tool
+def get_kw_sitemap(client_id: int) -> dict:
+    """
+    Fetches the keyword enhanced sitemap for a client from general_contexts.
+    The sitemap is stored as NDJSON (newline-delimited JSON) with one object per URL:
+    url, page_type, primary_keyword, secondary_keywords, notes, etc.
+
+    Args:
+        client_id (int): The client ID.
+
+    Returns:
+        dict: keyword_enhanced_sitemap_json (str or null), keyword_enhanced_sitemap_generated_at (ISO str or null).
+              If no context or no sitemap, json is null and generated_at is null.
+    """
+    db = get_db_session()
+    try:
+        result = db.execute(
+            text("""
+                SELECT keyword_enhanced_sitemap_json, keyword_enhanced_sitemap_generated_at
+                FROM general_contexts
+                WHERE client_id = :client_id
+            """),
+            {"client_id": client_id}
+        ).fetchone()
+
+        if not result:
+            return {
+                "keyword_enhanced_sitemap_json": None,
+                "keyword_enhanced_sitemap_generated_at": None,
+                "message": f"No general context found for client_id={client_id}. Run the pipeline first."
+            }
+
+        json_val = result[0]
+        generated_at = result[1]
+        return {
+            "keyword_enhanced_sitemap_json": json_val,
+            "keyword_enhanced_sitemap_generated_at": generated_at.isoformat() if generated_at else None,
+            "message": "No keyword enhanced sitemap yet. Run Sitemap then Keyword Enhanced Sitemap for this client." if not (json_val and json_val.strip()) else None,
         }
     finally:
         db.close()

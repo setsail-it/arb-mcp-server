@@ -1,3 +1,4 @@
+import logging
 import os
 import base64
 import json
@@ -5,7 +6,10 @@ import time
 import secrets
 import requests
 from typing import Optional
+from urllib.parse import urlparse
 from fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from dotenv import load_dotenv
@@ -49,6 +53,231 @@ def get_db_session() -> Session:
     if not _SessionLocal:
         raise ValueError("DATABASE_URL environment variable is not set.")
     return _SessionLocal()
+
+
+# --- DataForSEO On-Page: crawl site and return page URLs ---
+def _dataforseo_basic_auth() -> str:
+    """DataForSEO Basic auth: USERNAME + API_SECRET, or API_KEY + API_SECRET, or API_KEY as raw Base64."""
+    username = os.getenv("DATAFORSEO_USERNAME") or os.getenv("DATAFORSEO_API_KEY")
+    secret = os.getenv("DATAFORSEO_API_SECRET")
+    if username and secret:
+        return base64.b64encode(f"{username}:{secret}".encode()).decode()
+    if username:
+        return username  # assume already Base64
+    return ""
+
+
+def _normalize_target_domain(site_url: str) -> str:
+    """Extract target domain for DataForSEO (no scheme, no www). E.g. setsail.ca."""
+    p = urlparse(site_url)
+    netloc = (p.netloc or "").strip().lower()
+    if not netloc:
+        return ""
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    return netloc
+
+
+def _dataforseo_onpage_task_post(
+    target: str,
+    max_crawl_pages: int = 300,
+    load_resources: bool = True,
+    enable_javascript: bool = True,
+    force_sitewide_checks: bool = True,
+) -> dict:
+    """POST a crawl task. Returns API response; task id in tasks[0].id."""
+    auth = _dataforseo_basic_auth()
+    if not auth:
+        raise ValueError("DATAFORSEO_USERNAME + DATAFORSEO_API_SECRET (or API_KEY) not set.")
+    url = "https://api.dataforseo.com/v3/on_page/task_post"
+    headers = {"Content-Type": "application/json", "Authorization": f"Basic {auth}"}
+    payload = [
+        {
+            "target": target,
+            "max_crawl_pages": max_crawl_pages,
+            "load_resources": load_resources,
+            "enable_javascript": enable_javascript,
+            "force_sitewide_checks": force_sitewide_checks,
+        }
+    ]
+    r = requests.post(url, headers=headers, json=payload, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def _dataforseo_onpage_tasks_ready() -> dict:
+    """GET list of completed task ids. Ready task ids are in tasks[0].result[].id."""
+    auth = _dataforseo_basic_auth()
+    if not auth:
+        raise ValueError("DATAFORSEO_USERNAME + DATAFORSEO_API_SECRET (or API_KEY) not set.")
+    url = "https://api.dataforseo.com/v3/on_page/tasks_ready"
+    headers = {"Content-Type": "application/json", "Authorization": f"Basic {auth}"}
+    r = requests.get(url, headers=headers, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def _dataforseo_onpage_pages(task_id: str, limit: int = 1000, offset: int = 0) -> dict:
+    """POST to get pages for a task. URLs in tasks[0].result.items[].url."""
+    auth = _dataforseo_basic_auth()
+    if not auth:
+        raise ValueError("DATAFORSEO_USERNAME + DATAFORSEO_API_SECRET (or API_KEY) not set.")
+    url = "https://api.dataforseo.com/v3/on_page/pages"
+    headers = {"Content-Type": "application/json", "Authorization": f"Basic {auth}"}
+    payload = [{"id": task_id, "limit": limit, "offset": offset}]
+    r = requests.post(url, headers=headers, json=payload, timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+
+def fetch_site_pages_dataforseo_impl(
+    site_url: str,
+    max_crawl_pages: int = 300,
+    max_wait_seconds: int = 600,
+    poll_interval_seconds: int = 5,
+    save_sitemap_txt: Optional[str] = None,
+    save_sitemap_xml: Optional[str] = None,
+) -> dict:
+    """
+    DataForSEO On-Page flow:
+    1. POST task_post -> extract tasks[0].id (TASK_ID)
+    2. Poll tasks_ready every poll_interval_seconds; when tasks[0].result[].id contains TASK_ID -> proceed
+    3. Fetch pages (paginate), extract tasks[].result.items[].url
+    4. Optionally save URLs to sitemap.txt and/or sitemap.xml
+    Returns urls, total_count, task_id, error, and poll_seconds_waited.
+    """
+    import time as _time
+
+    target = _normalize_target_domain(site_url)
+    if not target:
+        return {"urls": [], "total_count": 0, "error": "Invalid or missing URL", "task_id": "", "poll_seconds_waited": 0}
+
+    if not _dataforseo_basic_auth():
+        return {"urls": [], "total_count": 0, "error": "DATAFORSEO_USERNAME + DATAFORSEO_API_SECRET not set", "task_id": "", "poll_seconds_waited": 0}
+
+    task_id = ""
+    poll_start = 0.0
+    try:
+        # STEP 1 — Create crawl task
+        post_resp = _dataforseo_onpage_task_post(target, max_crawl_pages)
+        if post_resp.get("status_code") != 20000:
+            msg = post_resp.get("status_message", "Unknown error")
+            return {"urls": [], "total_count": 0, "error": f"task_post: {msg}", "task_id": "", "poll_seconds_waited": 0}
+        tasks = post_resp.get("tasks") or []
+        if not tasks or not tasks[0].get("id"):
+            return {"urls": [], "total_count": 0, "error": "task_post: no task id in response", "task_id": "", "poll_seconds_waited": 0}
+        task_id = tasks[0]["id"]
+
+        # STEP 2 — Poll tasks_ready every poll_interval_seconds; check tasks[0].result[].id
+        deadline = _time.monotonic() + max_wait_seconds
+        task_ready = False
+        poll_start = _time.monotonic()
+        while _time.monotonic() < deadline:
+            logger.info(
+                "[Sitemap] Polling tasks_ready: task_id=%s, next check in %ss",
+                task_id,
+                poll_interval_seconds,
+            )
+            ready_resp = _dataforseo_onpage_tasks_ready()
+            if ready_resp.get("status_code") == 20000:
+                task_list = ready_resp.get("tasks") or []
+                result_list = task_list[0].get("result") if task_list else None
+                if isinstance(result_list, list):
+                    for item in result_list:
+                        if item.get("id") == task_id:
+                            task_ready = True
+                            break
+                if task_ready:
+                    break
+            _time.sleep(poll_interval_seconds)
+
+        poll_seconds_waited = _time.monotonic() - poll_start
+
+        if not task_ready:
+            return {
+                "urls": [],
+                "total_count": 0,
+                "error": f"Task not ready within {max_wait_seconds}s",
+                "task_id": task_id,
+                "poll_seconds_waited": round(poll_seconds_waited, 1),
+            }
+
+        # STEP 3 & 4 — Fetch pages (paginate), extract .tasks[].result.items[].url
+        all_urls = []
+        offset = 0
+        limit = 1000
+        while True:
+            pages_resp = _dataforseo_onpage_pages(task_id, limit=limit, offset=offset)
+            if pages_resp.get("status_code") != 20000:
+                break
+            task_list = pages_resp.get("tasks") or []
+            if not task_list:
+                break
+            result = task_list[0].get("result")
+            if not isinstance(result, dict):
+                break
+            items = result.get("items") or []
+            total_items = result.get("total_items_count", 0)
+            for it in items:
+                if isinstance(it, dict) and it.get("url"):
+                    all_urls.append(it["url"])
+            if offset + len(items) >= total_items or len(items) < limit:
+                break
+            offset += limit
+
+        # STEP 5 & 6 — Optionally save to sitemap.txt and sitemap.xml
+        if save_sitemap_txt:
+            with open(save_sitemap_txt, "w") as f:
+                for u in all_urls:
+                    f.write(u + "\n")
+        if save_sitemap_xml:
+            with open(save_sitemap_xml, "w") as f:
+                f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+                f.write('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n')
+                for u in all_urls:
+                    f.write(f"  <url><loc>{u}</loc></url>\n")
+                f.write("</urlset>\n")
+
+        return {
+            "urls": all_urls,
+            "total_count": len(all_urls),
+            "task_id": task_id,
+            "poll_seconds_waited": round(poll_seconds_waited, 1),
+        }
+    except requests.exceptions.RequestException as e:
+        poll_waited = round(_time.monotonic() - poll_start, 1) if poll_start else 0
+        return {"urls": [], "total_count": 0, "error": str(e), "task_id": task_id, "poll_seconds_waited": poll_waited}
+    except Exception as e:
+        return {"urls": [], "total_count": 0, "error": str(e), "task_id": "", "poll_seconds_waited": 0}
+
+
+@mcp.tool
+def fetch_site_pages_dataforseo(
+    site_url: str,
+    max_crawl_pages: int = 300,
+    max_wait_seconds: int = 600,
+    poll_interval_seconds: int = 5,
+) -> dict:
+    """
+    Crawl a website using DataForSEO On-Page API and return all discovered page URLs.
+    Flow: task_post -> poll tasks_ready every 5s -> fetch pages; URLs from .tasks[].result.items[].url.
+
+    Args:
+        site_url: Any URL of the site (e.g. https://www.setsail.ca or setsail.ca). Target domain is derived.
+        max_crawl_pages: Maximum number of pages to crawl (default 300).
+        max_wait_seconds: Maximum time to wait for crawl to complete (default 600).
+        poll_interval_seconds: Seconds between ready checks (default 5).
+
+    Returns:
+        dict: urls, total_count, task_id, poll_seconds_waited, and optional error.
+    """
+    return fetch_site_pages_dataforseo_impl(
+        site_url,
+        max_crawl_pages=max_crawl_pages,
+        max_wait_seconds=max_wait_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+
 
 @mcp.tool
 def get_search_volume(keyword: str, location_code: int = 2840, language_code: str = "en") -> dict:
@@ -2133,6 +2362,240 @@ def editStrategyAppendixB(client_id: int, version_number: int, content: str) -> 
         dict: Status and the updated section content.
     """
     return _update_strategy_section(client_id, version_number, "appendix_b", content)
+
+
+# --- DataForSEO Labs: Keyword Opportunities (competitors + gap keywords) ---
+LABS_BASE = "https://api.dataforseo.com/v3/dataforseo_labs/google"
+MAX_OPPORTUNITIES_COMPETITORS = 3
+MAX_OPPORTUNITIES_KEYWORDS_PER_COMPETITOR = 250
+MIN_OPPORTUNITIES_VOLUME = 10
+
+
+def _dataforseo_labs_post(endpoint: str, payload: list) -> dict:
+    auth = _dataforseo_basic_auth()
+    if not auth:
+        raise ValueError("DATAFORSEO_USERNAME + DATAFORSEO_API_SECRET (or API_KEY) not set.")
+    url = f"{LABS_BASE}/{endpoint}"
+    headers = {"Content-Type": "application/json", "Authorization": f"Basic {auth}"}
+    r = requests.post(url, headers=headers, json=payload, timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+
+def _fetch_competitors_domain(target: str, location_code: int = 2124, language_code: str = "en", limit: int = 50) -> list[str]:
+    """Fetch organic competitors for target. Returns list of competitor domains (max 50 from API)."""
+    payload = [{
+        "target": _normalize_target_domain(target) or target,
+        "location_code": location_code,
+        "language_code": language_code,
+        "limit": limit,
+    }]
+    data = _dataforseo_labs_post("competitors_domain/live", payload)
+    domains = []
+    for task in data.get("tasks") or []:
+        for res in task.get("result") or []:
+            items = res.get("items") or res.get("items_data") or (res.get("items_data") or {}).get("items") or []
+            if isinstance(items, list):
+                for it in items:
+                    d = it.get("domain") or it.get("competitor")
+                    if d and isinstance(d, str):
+                        domains.append(d.strip().lower())
+    # Dedupe, exclude target, return list
+    target_norm = (_normalize_target_domain(target) or target).lower()
+    seen = set()
+    out = []
+    for d in domains:
+        if d == target_norm or d in seen:
+            continue
+        seen.add(d)
+        out.append(d)
+    return out
+
+
+def _fetch_domain_intersection_gap(
+    competitor_domain: str,
+    target_domain: str,
+    location_code: int = 2124,
+    language_code: str = "en",
+    limit: int = 250,
+    min_vol: int = 10,
+) -> list[dict]:
+    """Keywords competitor ranks for that target doesn't (intersections=false). Returns list of item dicts."""
+    payload = [{
+        "target1": competitor_domain,
+        "target2": target_domain,
+        "location_code": location_code,
+        "language_code": language_code,
+        "intersections": False,
+        "item_types": ["organic"],
+        "limit": limit,
+        "filters": [["keyword_data.keyword_info.search_volume", ">", min_vol]],
+        "order_by": ["keyword_data.keyword_info.search_volume,desc"],
+    }]
+    data = _dataforseo_labs_post("domain_intersection/live", payload)
+    items = []
+    for task in data.get("tasks") or []:
+        for res in task.get("result") or []:
+            raw = res.get("items") or res.get("items_data") or (res.get("items_data") or {}).get("items") or []
+            if isinstance(raw, list):
+                items.extend(raw)
+    return items
+
+
+def fetch_keyword_opportunities_impl(
+    domain: str,
+    location_code: int = 2124,
+    language_code: str = "en",
+    max_competitors: int = MAX_OPPORTUNITIES_COMPETITORS,
+    gap_limit: int = MAX_OPPORTUNITIES_KEYWORDS_PER_COMPETITOR,
+    min_vol: int = MIN_OPPORTUNITIES_VOLUME,
+) -> dict:
+    """
+    Ahrefs-style keyword opportunities: get organic competitors, then gap keywords (they rank, we don't).
+    Returns { "opportunities": [...], "competitors_used": [...], "error": optional }.
+    Each opportunity: keyword, search_volume, cpc, competition, competitor_count, example_competitors, score.
+    """
+    target = _normalize_target_domain(domain) or domain.replace("https://", "").replace("http://", "").strip().lower()
+    if not target:
+        return {"opportunities": [], "competitors_used": [], "error": "Invalid or missing domain"}
+    if not _dataforseo_basic_auth():
+        return {"opportunities": [], "competitors_used": [], "error": "DATAFORSEO credentials not set"}
+
+    max_competitors = min(max_competitors, MAX_OPPORTUNITIES_COMPETITORS)
+    gap_limit = min(gap_limit, MAX_OPPORTUNITIES_KEYWORDS_PER_COMPETITOR)
+
+    try:
+        logger.info("[Keyword Opportunities] Fetching competitors for target=%s location=%s", target, location_code)
+        competitors = _fetch_competitors_domain(target, location_code=location_code, language_code=language_code)
+        competitors = [c for c in competitors if c != target][:max_competitors]
+        if not competitors:
+            logger.warning("[Keyword Opportunities] No competitors found for %s", target)
+            return {"opportunities": [], "competitors_used": [], "error": None}
+
+        logger.info("[Keyword Opportunities] Using competitors: %s", competitors)
+        # Aggregate by keyword: keyword -> { max_vol, max_cpc, max_comp, competitors[] }
+        agg: dict[str, dict] = {}
+        for comp in competitors:
+            try:
+                items = _fetch_domain_intersection_gap(
+                    comp, target,
+                    location_code=location_code,
+                    language_code=language_code,
+                    limit=gap_limit,
+                    min_vol=min_vol,
+                )
+            except Exception as e:
+                logger.warning("[Keyword Opportunities] Gap fetch failed for %s: %s", comp, e)
+                continue
+            for it in items:
+                kw = (it.get("keyword") or (it.get("keyword_data") or {}).get("keyword") or "").strip()
+                if not kw:
+                    continue
+                ki = (it.get("keyword_data") or {}).get("keyword_info") or {}
+                vol = int(ki.get("search_volume") or 0)
+                cpc = float(ki.get("cpc") or 0)
+                comp_val = float(ki.get("competition") or 0)
+                if kw not in agg:
+                    agg[kw] = {"search_volume": vol, "cpc": cpc, "competition": comp_val, "competitors": []}
+                else:
+                    agg[kw]["search_volume"] = max(agg[kw]["search_volume"], vol)
+                    agg[kw]["cpc"] = max(agg[kw]["cpc"], cpc)
+                    agg[kw]["competition"] = max(agg[kw]["competition"], comp_val)
+                if comp not in agg[kw]["competitors"]:
+                    agg[kw]["competitors"].append(comp)
+
+        opportunities = []
+        for kw, v in agg.items():
+            score = v["search_volume"] * (1 + v["cpc"])
+            opportunities.append({
+                "keyword": kw,
+                "search_volume": v["search_volume"],
+                "cpc": round(v["cpc"], 4),
+                "competition": round(v["competition"], 4),
+                "competitor_count": len(v["competitors"]),
+                "example_competitors": ",".join(v["competitors"][:5]),
+                "score": round(score, 4),
+            })
+        opportunities.sort(key=lambda x: x["score"], reverse=True)
+        logger.info("[Keyword Opportunities] Returning %d opportunities for %s", len(opportunities), target)
+        return {"opportunities": opportunities, "competitors_used": competitors, "error": None}
+    except Exception as e:
+        logger.exception("[Keyword Opportunities] Failed")
+        return {"opportunities": [], "competitors_used": [], "error": str(e)}
+
+
+@mcp.custom_route("/keyword-opportunities", methods=["POST"])
+async def keyword_opportunities_route(request):
+    """POST with JSON { \"domain\": \"setsail.ca\", \"location_code\": 2124 }; returns opportunities JSON."""
+    import asyncio
+    from starlette.responses import JSONResponse
+
+    try:
+        body = await request.json()
+    except Exception as e:
+        return JSONResponse({"error": f"Invalid JSON: {e}"}, status_code=400)
+    domain = (body.get("domain") or body.get("target") or "").strip()
+    if not domain:
+        return JSONResponse({"error": "Missing domain or target"}, status_code=400)
+    location_code = int(body.get("location_code", 2124))
+    language_code = str(body.get("language_code", "en"))
+    try:
+        result = await asyncio.to_thread(
+            fetch_keyword_opportunities_impl,
+            domain,
+            location_code=location_code,
+            language_code=language_code,
+            max_competitors=MAX_OPPORTUNITIES_COMPETITORS,
+            gap_limit=MAX_OPPORTUNITIES_KEYWORDS_PER_COMPETITOR,
+            min_vol=MIN_OPPORTUNITIES_VOLUME,
+        )
+    except Exception as e:
+        logger.exception("[Keyword Opportunities] route failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+    if result.get("error") and not result.get("opportunities"):
+        return JSONResponse({"error": result["error"]}, status_code=502)
+    return JSONResponse(result)
+
+
+# REST endpoint for arb-v1 backend: fetch sitemap XML (long-running, poll every 15s)
+@mcp.custom_route("/sitemap-fetch", methods=["POST"])
+async def sitemap_fetch_route(request):
+    """POST with JSON { \"domain\": \"setsail.ca\" }; returns sitemap XML or error."""
+    import asyncio
+    from starlette.responses import Response, JSONResponse
+
+    try:
+        body = await request.json()
+    except Exception as e:
+        return JSONResponse({"error": f"Invalid JSON: {e}"}, status_code=400)
+    domain = body.get("domain") or body.get("target") or ""
+    domain = (domain or "").strip()
+    if not domain:
+        return JSONResponse({"error": "Missing domain or target"}, status_code=400)
+    site_url = domain if domain.startswith("http") else f"https://{domain}"
+    try:
+        result = await asyncio.to_thread(
+            fetch_site_pages_dataforseo_impl,
+            site_url,
+            max_wait_seconds=1800,
+            poll_interval_seconds=15,
+        )
+    except Exception as e:
+        logger.exception("[Sitemap] sitemap-fetch failed")
+        return JSONResponse({"error": str(e)}, status_code=500)
+    err = result.get("error")
+    if err:
+        return JSONResponse({"error": err}, status_code=502)
+    urls = result.get("urls") or []
+    xml_parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for u in urls:
+        xml_parts.append(f"  <url><loc>{u}</loc></url>")
+    xml_parts.append("</urlset>")
+    xml_str = "\n".join(xml_parts)
+    return Response(content=xml_str.encode("utf-8"), media_type="application/xml")
 
 
 if __name__ == "__main__":

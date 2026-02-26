@@ -942,6 +942,59 @@ def get_kw_sitemap(client_id: int) -> dict:
         db.close()
 
 
+def _arb_backend_url() -> str:
+    """Base URL of the arb backend (for triggering KES job)."""
+    return (
+        os.getenv("ARB_BACKEND_URL")
+        or os.getenv("BACKEND_URL")
+        or "https://arb-production-8438.up.railway.app"
+    ).rstrip("/")
+
+
+@mcp.tool
+def update_kw_sitemap(client_id: int) -> dict:
+    """
+    Triggers an update (regeneration) of the keyword enhanced sitemap for a client.
+    Calls the arb backend to run the Keyword Enhanced Sitemap job. The client must
+    already have a sitemap in context (run Sitemap first if needed).
+    Use get_kw_sitemap(client_id) to read the updated sitemap after the job completes.
+
+    Args:
+        client_id (int): The client ID whose keyword enhanced sitemap should be updated.
+
+    Returns:
+        dict: job_id (str), message (str). On failure, error (str) and optional status_code.
+    """
+    url = f"{_arb_backend_url()}/clients/{client_id}/context/keyword-enhanced-sitemap/retry"
+    try:
+        resp = requests.post(url, timeout=30)
+        data = resp.json() if resp.text else {}
+        if not resp.ok:
+            detail = data.get("detail")
+            if isinstance(detail, list) and detail:
+                detail = detail[0].get("msg", str(detail[0])) if isinstance(detail[0], dict) else str(detail[0])
+            elif not isinstance(detail, str):
+                detail = resp.text or f"HTTP {resp.status_code}"
+            return {
+                "job_id": "",
+                "message": "Keyword enhanced sitemap update failed.",
+                "error": detail,
+                "status_code": resp.status_code,
+            }
+        job_id = data.get("job_id", "")
+        return {
+            "job_id": job_id,
+            "message": f"Keyword enhanced sitemap update started for client_id={client_id}. Poll GET /clients/{client_id}/context/keyword-enhanced-sitemap/status for status, then use get_kw_sitemap({client_id}) to read the result.",
+        }
+    except requests.RequestException as e:
+        logger.exception("update_kw_sitemap request failed")
+        return {
+            "job_id": "",
+            "message": "Keyword enhanced sitemap update failed.",
+            "error": str(e),
+        }
+
+
 @mcp.tool
 def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
     """
@@ -1738,6 +1791,7 @@ STRATEGY_SECTIONS = {
     "section_14": "Next Steps & Kickoff",
     "appendix_a": "Glossary of Terms",
     "appendix_b": "Key Contacts",
+    "appendix_c": "Sitemap with recommended Keywords",
 }
 
 # SQL to create strategies table if it doesn't exist
@@ -1763,6 +1817,7 @@ CREATE TABLE IF NOT EXISTS strategies (
     section_14 TEXT,
     appendix_a TEXT,
     appendix_b TEXT,
+    appendix_c TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(client_id, version_number)
@@ -1888,6 +1943,10 @@ def _assemble_full_strategy(strategy: dict) -> str:
     
     if strategy.get("appendix_b"):
         parts.append(strategy["appendix_b"])
+        parts.append("\n\n---\n\n")
+    
+    if strategy.get("appendix_c"):
+        parts.append(strategy["appendix_c"])
     
     return "".join(parts).strip()
 
@@ -2307,6 +2366,24 @@ def editStrategyAppendixB(client_id: int, version_number: int, content: str) -> 
         dict: Status and the updated section content.
     """
     return _update_strategy_section(client_id, version_number, "appendix_b", content)
+
+
+@mcp.tool
+def editStrategyAppendixC(client_id: int, version_number: int, content: str) -> dict:
+    """
+    Updates Appendix C: Sitemap with recommended Keywords of a strategy.
+    Use get_kw_sitemap(client_id) to obtain the current keyword enhanced sitemap (NDJSON).
+    Use update_kw_sitemap(client_id) to regenerate the sitemap before editing if needed.
+    
+    Args:
+        client_id (int): The client ID.
+        version_number (int): The strategy version to edit.
+        content (str): The new content for this section (markdown format; typically the sitemap with recommended keywords).
+    
+    Returns:
+        dict: Status and the updated section content.
+    """
+    return _update_strategy_section(client_id, version_number, "appendix_c", content)
 
 
 # --- DataForSEO Keywords Data (Google Ads) ---

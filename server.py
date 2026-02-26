@@ -1064,6 +1064,131 @@ def get_webflow_pages(site_id: Optional[str] = None, client_id: Optional[int] = 
         db.close()
 
 
+# --- Webflow Page API (single page get/update; site publish) ---
+WEBFLOW_API_BASE = "https://api.webflow.com/v2"
+
+
+def _webflow_headers() -> dict:
+    token = (os.getenv("WEBFLOW_ACCESS_TOKEN") or "").strip()
+    if not token:
+        raise ValueError("WEBFLOW_ACCESS_TOKEN is not set.")
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+
+
+@mcp.tool
+def get_webflow_page(page_id: str) -> dict:
+    """
+    Fetches a single Webflow page by ID. Returns id, title, seo, openGraph, publishedPath.
+
+    Args:
+        page_id (str): The Webflow page ID.
+
+    Returns:
+        dict: id, title, seo, openGraph, publishedPath. On error, error (str).
+    """
+    try:
+        headers = _webflow_headers()
+        r = requests.get(
+            f"{WEBFLOW_API_BASE}/pages/{page_id}",
+            headers=headers,
+            timeout=30,
+        )
+        r.raise_for_status()
+        data = r.json()
+        return {
+            "id": data.get("id"),
+            "title": data.get("title"),
+            "seo": data.get("seo"),
+            "openGraph": data.get("openGraph"),
+            "publishedPath": data.get("publishedPath"),
+        }
+    except requests.RequestException as e:
+        return {"error": str(e), "id": None, "title": None, "seo": None, "openGraph": None, "publishedPath": None}
+    except ValueError as e:
+        return {"error": str(e), "id": None, "title": None, "seo": None, "openGraph": None, "publishedPath": None}
+
+
+@mcp.tool
+def update_webflow_page(
+    page_id: str,
+    seo: Optional[dict] = None,
+    open_graph: Optional[dict] = None,
+) -> dict:
+    """
+    Updates a Webflow page's SEO and/or Open Graph metadata.
+    Pass seo (e.g. {"title": "...", "description": "..."}) and/or open_graph
+    (e.g. {"title": "...", "description": "...", "titleCopied": false, "descriptionCopied": false}).
+    Only provided keys are sent; omit a key to leave it unchanged.
+
+    Args:
+        page_id (str): The Webflow page ID.
+        seo (dict, optional): SEO object with title, description, etc.
+        open_graph (dict, optional): Open Graph object with title, description, titleCopied, descriptionCopied.
+
+    Returns:
+        dict: Updated page snippet or error.
+    """
+    try:
+        headers = _webflow_headers()
+        headers["Content-Type"] = "application/json"
+        body = {}
+        if seo is not None:
+            body["seo"] = seo
+        if open_graph is not None:
+            body["openGraph"] = open_graph
+        if not body:
+            return {"error": "Provide at least one of seo or open_graph."}
+        r = requests.put(
+            f"{WEBFLOW_API_BASE}/pages/{page_id}",
+            headers=headers,
+            json=body,
+            timeout=30,
+        )
+        r.raise_for_status()
+        data = r.json()
+        return {
+            "id": data.get("id"),
+            "title": data.get("title"),
+            "seo": data.get("seo"),
+            "openGraph": data.get("openGraph"),
+            "publishedPath": data.get("publishedPath"),
+        }
+    except requests.RequestException as e:
+        return {"error": str(e)}
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool
+def publish_webflow_site(site_id: str) -> dict:
+    """
+    Publishes the Webflow site (pushes draft changes live). Use after updating pages.
+    Requires WEBFLOW_ACCESS_TOKEN.
+
+    Args:
+        site_id (str): The Webflow site ID.
+
+    Returns:
+        dict: Result from Webflow or error.
+    """
+    try:
+        headers = _webflow_headers()
+        r = requests.post(
+            f"{WEBFLOW_API_BASE}/sites/{site_id}/publish",
+            headers=headers,
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.json() if r.text else {"status": "ok"}
+    except requests.RequestException as e:
+        return {"error": str(e)}
+    except ValueError as e:
+        return {"error": str(e)}
+
+
 @mcp.tool
 def generate_image(prompt: str, filename: str = "generated_image.png") -> dict:
     """

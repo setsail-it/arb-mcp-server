@@ -1,1 +1,8 @@
 .env
+__pycache__/
+*.py[cod]
+mcpVenv/
+.venv/
+venv/
+*.db
+.DS_Store

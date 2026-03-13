@@ -1,1 +1,1 @@
-# arb-mcp-server
+# mcp-server

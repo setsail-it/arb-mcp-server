@@ -18,7 +18,7 @@
      - `GOOGLE_API_KEY` - Your Google API key (required for image generation via Gemini)
      - `AWS_ACCESS_KEY_ID` - Your AWS access key ID (required for S3 image hosting)
      - `AWS_SECRET_ACCESS_KEY` - Your AWS secret access key (required for S3 image hosting)
-     - `AWS_S3_BUCKET` - Your S3 bucket name (defaults to "arb-imgs" if not set)
+     - `AWS_S3_BUCKET` - Your S3 bucket name (required)
      - `AWS_REGION` - AWS region (defaults to "us-east-2" if not set)
    - Optionally set `PORT` (defaults to 8000 if not set)
 
